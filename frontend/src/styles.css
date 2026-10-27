@@ -1,0 +1,108 @@
+:root {
+  color-scheme: light;
+  --surface-0: #f4f4f2;
+  --surface-1: #fcfcfb;
+  --surface-2: #f0efec;
+  --border: #e2e1dc;
+  --grid: #ebeae6;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #85847f;
+
+  --series-1: #2a78d6;
+  --series-1-soft: #cde2fb;
+  --target: #85847f;
+
+  /* 達成率雙向色階：低於目標（紅）← 灰 → 高於目標（藍） */
+  --div-neg-2: #f6c4c3;
+  --div-neg-1: #fbe3e2;
+  --div-mid: #f0efec;
+  --div-pos-1: #cde2fb;
+  --div-pos-2: #9ec5f4;
+  --div-neg-ink: #b42c2b;
+  --div-pos-ink: #1c5cab;
+
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-critical: #d03b3b;
+  --status-off: #b5b4ae;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --surface-0: #121211;
+    --surface-1: #1a1a19;
+    --surface-2: #242422;
+    --border: #33332f;
+    --grid: #2a2a27;
+    --text-primary: #f0efec;
+    --text-secondary: #c3c2b7;
+    --text-muted: #8f8e86;
+    --series-1: #3987e5;
+    --series-1-soft: #1c3a5e;
+    --target: #8f8e86;
+    --div-neg-2: #6b2a2a;
+    --div-neg-1: #432625;
+    --div-mid: #2c2c29;
+    --div-pos-1: #1c3a5e;
+    --div-pos-2: #184f95;
+    --div-neg-ink: #f09a9a;
+    --div-pos-ink: #9ec5f4;
+    --status-off: #5c5b56;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-0: #121211;
+  --surface-1: #1a1a19;
+  --surface-2: #242422;
+  --border: #33332f;
+  --grid: #2a2a27;
+  --text-primary: #f0efec;
+  --text-secondary: #c3c2b7;
+  --text-muted: #8f8e86;
+  --series-1: #3987e5;
+  --series-1-soft: #1c3a5e;
+  --target: #8f8e86;
+  --div-neg-2: #6b2a2a;
+  --div-neg-1: #432625;
+  --div-mid: #2c2c29;
+  --div-pos-1: #1c3a5e;
+  --div-pos-2: #184f95;
+  --div-neg-ink: #f09a9a;
+  --div-pos-ink: #9ec5f4;
+  --status-off: #5c5b56;
+}
+
+* { box-sizing: border-box; }
+html, body, #app { margin: 0; height: 100%; }
+body {
+  background: var(--surface-0);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+.num { font-variant-numeric: tabular-nums; }
+.muted { color: var(--text-muted); }
+.secondary { color: var(--text-secondary); }
+
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  min-width: 0;
+}
+.card h3 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.card h3 small { font-weight: 400; color: var(--text-muted); font-size: 12px; }
+.page { padding: 16px; display: flex; flex-direction: column; gap: 16px; max-width: 1600px; margin: 0 auto; }
+.page-title { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.page-title h2 { margin: 0; font-size: 20px; }
