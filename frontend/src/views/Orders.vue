@@ -88,7 +88,7 @@
                   <el-button v-if="row.status === 'DRAFT' && session.can('wo:release')" size="small" type="primary" @click="release([row])">開立</el-button>
                   <el-button v-if="row.status === 'DRAFT' && canEdit" size="small" @click="openWO(row)">修改</el-button>
                   <el-button v-if="['RELEASED', 'IN_PROGRESS'].includes(row.status) && session.can('inventory:edit')" size="small" @click="issue(row.id)">發料</el-button>
-                  <el-button v-if="row.cards && row.status !== 'CANCELLED'" size="small" @click="printCards(row.id)">流程卡</el-button>
+                  <el-button v-if="row.cards && row.status !== 'CANCELLED'" size="small" @click="openCards(row)">流程卡</el-button>
                   <el-button v-if="['DRAFT', 'RELEASED'].includes(row.status) && canEdit" size="small" text type="danger" @click="cancelWO(row)">取消</el-button>
                 </div>
               </template>
@@ -112,6 +112,7 @@
       </el-tabs>
     </div>
 
+    <CardsDialog v-model="cardsDlg.open" :wo-id="cardsDlg.id" :wo-no="cardsDlg.woNo" @changed="load" />
     <SalesOrderDialog v-model="soDlg.open" :order="soDlg.order" :customers="customers" :products="products" @saved="load" />
 
     <el-dialog v-model="woDlg.open" :title="woDlg.id ? `修改製令 ${woDlg.woNo}` : '新增製令（不經訂單）'" width="min(460px, 94vw)">
@@ -157,6 +158,7 @@ import { api, fmt } from '../api'
 import { useSession } from '../stores/session'
 import { statusText, type WorkOrder } from '../components/dashboard/types'
 import SalesOrderDialog from '../components/orders/SalesOrderDialog.vue'
+import CardsDialog from '../components/orders/CardsDialog.vue'
 import type { Customer, ProductLite, SalesOrder } from '../components/orders/types'
 
 const session = useSession()
@@ -302,8 +304,9 @@ async function issue(id: string) {
     fail(e)
   }
 }
-function printCards(id: string) {
-  window.open(`/print/cards/${id}`, '_blank')
+const cardsDlg = reactive({ open: false, id: '', woNo: '' })
+function openCards(w: WorkOrder) {
+  Object.assign(cardsDlg, { open: true, id: w.id, woNo: w.woNo })
 }
 
 function openCustomer(c: Customer | null) {

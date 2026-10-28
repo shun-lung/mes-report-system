@@ -204,18 +204,21 @@ func (h *Handler) cardInfo(c *gin.Context) {
 		ImageID   *uuid.UUID `json:"imageId"`
 		OnRoute   bool       `json:"onRoute"`
 		Remaining float64    `json:"remaining"`
+		StepSeq   int        `json:"stepSeq"` // 本線所屬站點在途程中的站序
+		ParentNo  *string    `json:"parentCardNo"`
 		Steps     []cardStep `json:"steps"`
 	}
 	var cardID uuid.UUID
 	err := h.svc.pool.QueryRow(c, `
 		SELECT fc.id, fc.card_no, fc.qty, fc.status, w.id, w.wo_no, w.status, p.item_no, p.name, p.unit,
-		       (SELECT i.id FROM product_images i WHERE i.product_id = p.id ORDER BY i.is_primary DESC, i.sort_order LIMIT 1)
+		       (SELECT i.id FROM product_images i WHERE i.product_id = p.id ORDER BY i.is_primary DESC, i.sort_order LIMIT 1),
+		       (SELECT pc.card_no FROM flow_cards pc WHERE pc.id = fc.parent_card_id)
 		FROM flow_cards fc
 		JOIN work_orders w ON w.id = fc.work_order_id
 		JOIN products p ON p.id = w.product_id
 		WHERE fc.card_no = $1 AND fc.factory_id = $2`, cardNo, auth.FactoryID(c)).
 		Scan(&cardID, &res.CardNo, &res.CardQty, &res.Status, &res.WOID, &res.WONo, &res.WOStatus,
-			&res.ItemNo, &res.ItemName, &res.Unit, &res.ImageID)
+			&res.ItemNo, &res.ItemName, &res.Unit, &res.ImageID, &res.ParentNo)
 	if err == pgx.ErrNoRows {
 		httpx.Fail(c, httpx.Biz("找不到流程卡「%s」", cardNo))
 		return
@@ -238,7 +241,7 @@ func (h *Handler) cardInfo(c *gin.Context) {
 	}
 	for _, s := range res.Steps {
 		if s.Here {
-			res.OnRoute, res.Remaining = true, s.Remaining
+			res.OnRoute, res.Remaining, res.StepSeq = true, s.Remaining, s.Seq
 		}
 	}
 	c.JSON(http.StatusOK, res)

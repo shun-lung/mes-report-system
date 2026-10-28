@@ -73,11 +73,12 @@
             <div class="card-info">
               <div class="card-no num">{{ card.cardNo }}</div>
               <div class="item">{{ card.itemNo }} {{ card.itemName }}</div>
-              <div class="muted">製令 {{ card.woNo }} · 本卡 {{ fmt.int(card.cardQty) }} {{ card.unit }}</div>
+              <div class="muted">製令 {{ card.woNo }} · 本卡 {{ fmt.int(card.cardQty) }} {{ card.unit }}<template v-if="card.parentCardNo"> · 拆自 {{ shortCard(card.parentCardNo) }}</template></div>
             </div>
             <div class="remain">
               <span>本站可報</span>
               <b class="num">{{ fmt.int(card.remaining) }}</b>
+              <el-button v-if="card.remaining > 1" size="small" text class="split-btn" @click="openSplit">拆卡</el-button>
             </div>
           </div>
 
@@ -165,7 +166,7 @@ interface State {
 }
 interface Card {
   cardNo: string; cardQty: number; status: string; woId: string; woNo: string; woStatus: string; itemNo: string; itemName: string; unit: string
-  imageId: string | null; onRoute: boolean; remaining: number
+  imageId: string | null; onRoute: boolean; remaining: number; stepSeq: number; parentCardNo: string | null
   steps: { seq: number; station: string; input: number; good: number; defect: number; remaining: number; here: boolean }[]
 }
 interface DefectCode { id: string; stationId: string | null; code: string; name: string; isActive: boolean }
@@ -271,6 +272,10 @@ async function lookup(raw: string) {
   clearCard()
   try {
     const c = await api<Card>(`/cards/${encodeURIComponent(cardNo)}?lineId=${lineId.value}`)
+    if (c.status === 'VOID') {
+      show('err', `流程卡 ${c.cardNo} 已作廢（已合併回原卡）`)
+      return focusScan()
+    }
     if (!c.onRoute) {
       show('err', `此流程卡的途程不經過「${state.value?.line.stationName}」`)
       return focusScan()
@@ -363,6 +368,33 @@ async function undo(r: State['recent'][number]) {
     show('ok', `✓ 已撤銷 ${shortCard(r.cardNo)}：良品 ${fmt.int(res.goodQty)} 已退回，本站可報 ${fmt.int(res.remaining)}`)
     clearCard()
     await loadState()
+  } catch (e) {
+    if (e !== 'cancel' && e !== 'close') show('err', (e as Error).message)
+  }
+  focusScan()
+}
+
+// 拆卡：從本站待做量分出新卡（例如部分先送下一站），拆完可列印新卡
+async function openSplit() {
+  const c = card.value
+  if (!c) return
+  try {
+    const { value } = await ElMessageBox.prompt(
+      `從 ${shortCard(c.cardNo)} 在「${state.value?.line.stationName}」的待做 ${fmt.int(c.remaining)} 雙中，拆出幾雙成為新卡？`,
+      '拆卡', { confirmButtonText: '下一步', cancelButtonText: '取消', inputValue: String(Math.floor(c.remaining / 2)),
+        inputValidator: (v) => { const n = Number(v); return n > 0 && n <= c.remaining && Number.isInteger(n) ? true : `請輸入 1～${c.remaining}` } },
+    )
+    const qty = Number(value)
+    const { value: reason } = await ElMessageBox.prompt('拆卡原因', '拆卡', {
+      confirmButtonText: '拆卡', cancelButtonText: '取消', inputPlaceholder: '例如：部分先送下一站',
+      inputValidator: (v) => (v && v.trim() ? true : '請填寫原因'),
+    })
+    const r = await api<{ cardNo: string; qty: number; workOrderId: string }>(`/cards/${encodeURIComponent(c.cardNo)}/split`, {
+      method: 'POST', body: { stepSeq: c.stepSeq, qty, reason: reason.trim() },
+    })
+    window.open(`/print/cards/${r.workOrderId}?cards=${encodeURIComponent([c.cardNo, r.cardNo].join(','))}`, '_blank')
+    await lookup(c.cardNo) // 重新帶出原卡（會重設提示），之後再顯示拆卡結果
+    show('ok', `✓ 已拆出 ${shortCard(r.cardNo)}（${fmt.int(r.qty)} 雙），請列印新流程卡；原卡本站還可報 ${fmt.int(card.value?.remaining ?? 0)}`)
   } catch (e) {
     if (e !== 'cancel' && e !== 'close') show('err', (e as Error).message)
   }
@@ -480,6 +512,7 @@ onUnmounted(() => {
 .remain { text-align: center; padding: 8px 16px; border-radius: 10px; background: var(--series-1-soft); }
 .remain span { display: block; font-size: 13px; color: var(--text-secondary); }
 .remain b { font-size: 36px; }
+.split-btn { display: block; margin: 2px auto 0; }
 .steps { display: flex; gap: 6px; flex-wrap: wrap; }
 .step { padding: 6px 12px; border-radius: 8px; background: var(--surface-2); color: var(--text-secondary); font-size: 14px; display: flex; flex-direction: column; line-height: 1.3; }
 .step.here { background: var(--series-1); color: #fff; font-weight: 600; }

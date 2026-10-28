@@ -105,7 +105,7 @@ func (s *Service) ReverseScan(ctx context.Context, factoryID, scanID, userID uui
 		}
 		if hasNext && sc.good > 0 {
 			if nextRemaining < sc.good {
-				return httpx.Biz("下一站「%s」已回報這張卡的部分數量（尚可撤回 %g，需要 %g），請先撤銷下一站的回報", nextStation, nextRemaining, sc.good)
+				return httpx.Biz("下一站「%s」可撤回量只有 %g（需要 %g）：下一站已回報或已拆卡，請先撤銷下一站的回報或合併子卡", nextStation, nextRemaining, sc.good)
 			}
 			if _, err := tx.Exec(ctx, `UPDATE flow_card_progress SET input_qty = input_qty - $3 WHERE card_id = $1 AND step_seq = $2`,
 				sc.cardID, nextSeq, sc.good); err != nil {

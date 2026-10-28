@@ -7,7 +7,7 @@
       </div>
       <span class="spacer" />
       <el-radio-group v-model="scope" size="default">
-        <el-radio-button value="all">全部（{{ cards.length }}）</el-radio-button>
+        <el-radio-button value="all">{{ only.length ? '指定' : '全部' }}（{{ pool.length }}）</el-radio-button>
         <el-radio-button value="new" :disabled="!unprinted.length">未印過（{{ unprinted.length }}）</el-radio-button>
       </el-radio-group>
       <el-button type="primary" :disabled="!selected.length" @click="doPrint">列印／另存 PDF</el-button>
@@ -20,7 +20,11 @@
       <article v-for="(c, i) in selected" :key="c.cardNo" class="fcard">
         <header>
           <span class="factory">{{ wo.factory }} · 流程卡</span>
-          <span class="seq">第 {{ indexOf(c) + 1 }} / {{ cards.length }} 張<template v-if="c.printCount"> · 補印</template></span>
+          <span class="seq">
+            <template v-if="c.parentCardNo">拆自 {{ c.parentCardNo.split('-').slice(-1)[0] }}</template>
+            <template v-else>第 {{ indexOf(c) + 1 }} / {{ cards.length }} 張</template>
+            <template v-if="c.printCount"> · 補印</template>
+          </span>
         </header>
         <div class="main">
           <div class="left">
@@ -52,7 +56,7 @@ import JsBarcode from 'jsbarcode'
 import { api } from '../api'
 import { useSession } from '../stores/session'
 
-interface Card { cardNo: string; qty: number; status: string; printCount: number; lastPrintedAt: string | null }
+interface Card { cardNo: string; qty: number; status: string; printCount: number; lastPrintedAt: string | null; parentCardNo: string | null }
 interface WO {
   woNo: string; status: string; plannedQty: number; dueDate: string | null; itemNo: string; itemName: string; spec: string | null
   unit: string; imageId: string | null; soNo: string | null; customer: string | null; factory: string; routing: string[]
@@ -65,7 +69,10 @@ const cards = ref<Card[]>([])
 const scope = ref<'all' | 'new'>('all')
 const error = ref('')
 const unprinted = computed(() => cards.value.filter((c) => !c.printCount))
-const selected = computed(() => (scope.value === 'new' ? unprinted.value : cards.value))
+// ?cards=a,b 只印指定的卡（例如拆卡後的新卡與原卡）
+const only = computed(() => String(route.query.cards ?? '').split(',').filter(Boolean))
+const pool = computed(() => (only.value.length ? cards.value.filter((c) => only.value.includes(c.cardNo)) : cards.value))
+const selected = computed(() => (scope.value === 'new' ? pool.value.filter((c) => !c.printCount) : pool.value))
 const indexOf = (c: Card) => cards.value.indexOf(c)
 
 // Code128 條碼；補上 viewBox 讓 SVG 可依版面縮放（條寬比例不變，掃描不受影響）

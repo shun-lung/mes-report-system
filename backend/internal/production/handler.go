@@ -43,6 +43,9 @@ func (h *Handler) Register(scoped *gin.RouterGroup) {
 
 	scoped.GET("/station/state", auth.Require("scan:report"), h.stationState)
 	scoped.GET("/cards/:cardNo", auth.Require("scan:report"), h.cardInfo)
+	scoped.POST("/cards/:cardNo/split", auth.RequireAny("scan:report", "wo:edit"), h.splitCard)
+	scoped.POST("/cards/:cardNo/merge", auth.RequireAny("scan:report", "wo:edit"), h.mergeCard)
+	scoped.GET("/work-orders/:id/card-progress", auth.Require("wo:view"), h.workOrderCards)
 	scoped.POST("/scans", auth.Require("scan:report"), h.scan)
 	scoped.GET("/scans", auth.RequireAny("wo:view", "scan:report"), h.listScans)
 	scoped.POST("/scans/:id/reverse", auth.RequireAny("scan:report", "wo:edit"), h.reverseScan)
