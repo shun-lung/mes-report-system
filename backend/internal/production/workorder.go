@@ -189,9 +189,24 @@ func (s *Service) Release(ctx context.Context, factoryID, woID, userID uuid.UUID
 	return res, err
 }
 
-// IssueMaterials 倉管發料：將製令所有「出庫扣帳」料件的未發數量自材料倉扣帳。
-func (s *Service) IssueMaterials(ctx context.Context, factoryID, woID, userID uuid.UUID, at time.Time) (int, error) {
-	issued := 0
+// IssueResult 發料結果：實發明細、因庫存不足而少發或未發的料件，以及由現場掃描自動扣帳（不需發料）的料件。
+type IssueResult struct {
+	Issued    []IssueLine `json:"issued"`
+	Short     []IssueLine `json:"short"`
+	OnArrival []string    `json:"onArrival"`
+}
+
+type IssueLine struct {
+	ItemNo string  `json:"itemNo"`
+	Unit   string  `json:"unit"`
+	Qty    float64 `json:"qty"`             // 實發量；Short 中為仍未發的量
+	Stock  float64 `json:"stock,omitempty"` // Short：發料當下的庫存
+}
+
+// IssueMaterials 倉管發料：將製令「出庫扣帳」料件的未發數量自所屬倉扣帳。
+// 庫存不足時依現有庫存調整發料量（不發成負數），其餘列為不足；到站扣帳料件由現場掃描自動扣帳，不在此發料。
+func (s *Service) IssueMaterials(ctx context.Context, factoryID, woID, userID uuid.UUID, at time.Time) (IssueResult, error) {
+	res := IssueResult{Issued: []IssueLine{}, Short: []IssueLine{}, OnArrival: []string{}}
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var status string
 		if err := tx.QueryRow(ctx, `SELECT status FROM work_orders WHERE id = $1 AND factory_id = $2 FOR UPDATE`,
@@ -206,43 +221,60 @@ func (s *Service) IssueMaterials(ctx context.Context, factoryID, woID, userID uu
 			return err
 		}
 		rows, err := tx.Query(ctx, `
-			SELECT m.id, m.product_id, p.category, m.required_qty - m.issued_qty
+			SELECT m.id, m.product_id, p.item_no, p.unit, p.category, m.deduct_timing, m.required_qty - m.issued_qty
 			FROM work_order_materials m JOIN products p ON p.id = m.product_id
-			WHERE m.work_order_id = $1 AND m.deduct_timing = 'ON_ISSUE' AND m.required_qty > m.issued_qty
+			WHERE m.work_order_id = $1 AND m.required_qty > m.issued_qty
+			ORDER BY p.item_no
 			FOR UPDATE OF m`, woID)
 		if err != nil {
 			return err
 		}
 		type pending struct {
-			ID, ProductID uuid.UUID
-			Category      string
-			Qty           float64
+			ID, ProductID                  uuid.UUID
+			ItemNo, Unit, Category, Timing string
+			Qty                            float64
 		}
 		list, err := pgx.CollectRows(rows, pgx.RowToStructByPos[pending])
 		if err != nil {
 			return err
 		}
 		for _, m := range list {
+			if m.Timing != "ON_ISSUE" {
+				res.OnArrival = append(res.OnArrival, m.ItemNo)
+				continue
+			}
 			wh, err := inventory.Warehouse(ctx, tx, factoryID, inventory.WarehouseTypeFor(m.Category))
 			if err != nil {
 				return err
 			}
-			_, err = inventory.Post(ctx, tx, inventory.Txn{
-				FactoryID: factoryID, Type: "ISSUE", WarehouseID: wh, ProductID: m.ProductID, Qty: -m.Qty,
+			var stock float64
+			if err := tx.QueryRow(ctx, `
+				SELECT COALESCE((SELECT qty FROM inventory_balances WHERE warehouse_id = $1 AND product_id = $2 FOR UPDATE), 0)`,
+				wh, m.ProductID).Scan(&stock); err != nil {
+				return err
+			}
+			qty := round4(math.Min(m.Qty, math.Max(stock, 0)))
+			if qty < m.Qty {
+				res.Short = append(res.Short, IssueLine{ItemNo: m.ItemNo, Unit: m.Unit, Qty: round4(m.Qty - qty), Stock: stock})
+			}
+			if qty <= 0 {
+				continue
+			}
+			if _, err := inventory.Post(ctx, tx, inventory.Txn{
+				FactoryID: factoryID, Type: "ISSUE", WarehouseID: wh, ProductID: m.ProductID, Qty: -qty,
 				WorkOrderID: &woID, RefType: "wo_material", RefID: &m.ID, At: at, WorkDate: workDate, UserID: userID,
 				Note: "製令發料",
-			})
-			if err != nil {
+			}); err != nil {
 				return err
 			}
-			if _, err := tx.Exec(ctx, `UPDATE work_order_materials SET issued_qty = required_qty WHERE id = $1`, m.ID); err != nil {
+			if _, err := tx.Exec(ctx, `UPDATE work_order_materials SET issued_qty = issued_qty + $2 WHERE id = $1`, m.ID, qty); err != nil {
 				return err
 			}
-			issued++
+			res.Issued = append(res.Issued, IssueLine{ItemNo: m.ItemNo, Unit: m.Unit, Qty: qty})
 		}
 		return nil
 	})
-	return issued, err
+	return res, err
 }
 
 func round4(v float64) float64 {

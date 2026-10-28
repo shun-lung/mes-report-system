@@ -182,6 +182,20 @@ func (h *Handler) issue(c *gin.Context) {
 			}
 		}
 		for _, l := range in.Lines {
+			if in.WorkOrderID != nil {
+				// 到站扣帳料件由現場掃描時自動扣帳；若再手動發料會重複扣
+				var itemNo string
+				err := tx.QueryRow(ctx, `
+					SELECT p.item_no FROM work_order_materials m JOIN products p ON p.id = m.product_id
+					WHERE m.work_order_id = $1 AND m.product_id = $2 AND m.deduct_timing = 'ON_ARRIVAL' LIMIT 1`,
+					*in.WorkOrderID, l.ProductID).Scan(&itemNo)
+				if err == nil {
+					return httpx.Biz("%s 是「到站扣帳」料件，現場掃描回報時會自動扣帳，不需發料（手動發料會重複扣）", itemNo)
+				}
+				if err != pgx.ErrNoRows {
+					return err
+				}
+			}
 			if err := op.takeOut(ctx, tx, "ISSUE", in.WarehouseID, l.ProductID, l.Qty, in.WorkOrderID, "issue", in.Note); err != nil {
 				return err
 			}

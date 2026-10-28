@@ -26,8 +26,8 @@
           </el-form>
           <template v-if="woIssue.workOrderId">
             <div class="bar">
-              <span class="muted small">「到站扣帳」的料件會在現場掃描時自動扣，通常不需在此發料。</span>
-              <el-button size="small" @click="fillRemaining">依未發數量帶入（出庫扣帳料件）</el-button>
+              <span class="muted small">「到站扣帳」料件會在現場掃描時自動扣帳，不能在此發料（避免重複扣）。庫存不足時會依現有量帶入。</span>
+              <el-button size="small" @click="fillRemaining">依未發數量帶入</el-button>
             </div>
             <el-table :data="materials" size="small">
               <el-table-column label="料件" min-width="180">
@@ -41,12 +41,17 @@
               <el-table-column label="未發" width="90" align="right">
                 <template #default="{ row }"><span class="num" :class="{ warn: remainingOf(row) > 0 }">{{ q(remainingOf(row)) }}</span></template>
               </el-table-column>
-              <el-table-column label="此倉現有" width="100" align="right">
-                <template #default="{ row }"><span class="num">{{ q(stockOf(woIssue.warehouseId, row.productId)) }}</span> {{ row.unit }}</template>
-              </el-table-column>
-              <el-table-column label="本次發料" width="160">
+              <el-table-column label="此倉現有" width="110" align="right">
                 <template #default="{ row }">
-                  <el-input-number v-model="woIssue.qty[row.productId]" :min="0" controls-position="right" class="w-full" />
+                  <span class="num" :class="{ warn: row.deductTiming === 'ON_ISSUE' && stockOf(woIssue.warehouseId, row.productId) < remainingOf(row) }">
+                    {{ q(stockOf(woIssue.warehouseId, row.productId)) }}</span> {{ row.unit }}
+                  <div v-if="otherStock(row)" class="muted small">{{ otherStock(row) }}</div>
+                </template>
+              </el-table-column>
+              <el-table-column label="本次發料" width="170">
+                <template #default="{ row }">
+                  <span v-if="row.deductTiming !== 'ON_ISSUE'" class="muted small">現場掃描自動扣帳</span>
+                  <el-input-number v-else v-model="woIssue.qty[row.productId]" :min="0" controls-position="right" class="w-full" />
                 </template>
               </el-table-column>
             </el-table>
@@ -196,8 +201,24 @@ async function loadMaterials() {
   materials.value = await api<Material[]>(`/inventory/work-orders/${woIssue.workOrderId}/materials`)
   woIssue.qty = Object.fromEntries(materials.value.map((m) => [m.productId, 0]))
 }
+// 依未發量帶入；此倉庫存不足時改帶現有量並提示
 function fillRemaining() {
-  for (const m of materials.value) if (m.deductTiming === 'ON_ISSUE') woIssue.qty[m.productId] = remainingOf(m)
+  const short: string[] = []
+  for (const m of materials.value) {
+    if (m.deductTiming !== 'ON_ISSUE') continue
+    const stock = Math.max(0, stockOf(woIssue.warehouseId, m.productId))
+    const need = remainingOf(m)
+    woIssue.qty[m.productId] = Math.min(need, stock)
+    if (stock < need) short.push(`${m.itemNo} 缺 ${q(need - stock)} ${m.unit}`)
+  }
+  if (short.length) ElMessage.warning({ message: `此倉庫存不足，已依現有量帶入：${short.join('、')}`, duration: 6000 })
+  else if (!materials.value.some((m) => m.deductTiming === 'ON_ISSUE' && remainingOf(m) > 0)) ElMessage.info('出庫扣帳料件都已發完')
+}
+// 其他倉有庫存時提示（例如半成品在暫存倉）
+function otherStock(m: Material) {
+  const here = warehouses.value.find((w) => w.id === woIssue.warehouseId)?.code
+  const other = balances.value.filter((b) => b.productId === m.productId && b.warehouseCode !== here && b.qty > 0)
+  return other.length ? '其他倉：' + other.map((b) => `${b.warehouseCode} ${q(b.qty)}`).join('、') : ''
 }
 function loadAllForCount() {
   const code = warehouses.value.find((w) => w.id === adjust.warehouseId)?.code
@@ -218,7 +239,8 @@ async function submit(kind: 'receipt' | 'issue' | 'woIssue' | 'transfer' | 'adju
     body = { warehouseId: issue.warehouseId, note: issue.note, lines: validRows(issue.rows).map((r) => ({ productId: r.productId, qty: r.qty })) }
   } else if (kind === 'woIssue') {
     path = '/inventory/issues'
-    const lines = Object.entries(woIssue.qty).filter(([, v]) => v > 0).map(([productId, qty]) => ({ productId, qty }))
+    const onIssue = new Set(materials.value.filter((m) => m.deductTiming === 'ON_ISSUE').map((m) => m.productId))
+    const lines = Object.entries(woIssue.qty).filter(([id, v]) => v > 0 && onIssue.has(id)).map(([productId, qty]) => ({ productId, qty }))
     body = { warehouseId: woIssue.warehouseId, workOrderId: woIssue.workOrderId, note: woIssue.note, lines }
   } else if (kind === 'transfer') {
     path = '/inventory/transfers'

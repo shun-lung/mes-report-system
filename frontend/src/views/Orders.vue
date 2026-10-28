@@ -299,8 +299,14 @@ async function cancelWO(w: WorkOrder) {
 }
 async function issue(id: string) {
   try {
-    const r = await api<{ issuedLines: number }>(`/work-orders/${id}/issue`, { method: 'POST' })
-    ElMessage.success(r.issuedLines ? `已發料 ${r.issuedLines} 項（出庫扣帳料件）` : '沒有待發的出庫扣帳料件；其他補料請到「倉儲作業」')
+    type Line = { itemNo: string; unit: string; qty: number; stock?: number }
+    const r = await api<{ issued: Line[]; short: Line[]; onArrival: string[] }>(`/work-orders/${id}/issue`, { method: 'POST' })
+    const parts: string[] = []
+    if (r.issued.length) parts.push(`已發料：${r.issued.map((l) => `${l.itemNo} ${fmt.dec(l.qty, l.qty % 1 ? 2 : 0)}`).join('、')}`)
+    if (r.short.length) parts.push(`庫存不足已依現有量調整，仍缺：${r.short.map((l) => `${l.itemNo} ${fmt.dec(l.qty, l.qty % 1 ? 2 : 0)} ${l.unit}`).join('、')}（可到「缺料預警」產生採購單）`)
+    if (!r.issued.length && !r.short.length) parts.push('出庫扣帳料件都已發完')
+    if (r.onArrival.length) parts.push(`${r.onArrival.join('、')} 為到站扣帳，現場掃描時自動扣，不需發料`)
+    ElMessage({ type: r.short.length ? 'warning' : 'success', duration: 7000, message: parts.join('。') })
     await load()
   } catch (e) {
     fail(e)

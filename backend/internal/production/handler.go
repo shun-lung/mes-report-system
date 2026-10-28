@@ -103,12 +103,12 @@ func (h *Handler) issue(c *gin.Context) {
 	if !ok {
 		return
 	}
-	n, err := h.svc.IssueMaterials(c, auth.FactoryID(c), id, auth.UserID(c), time.Now())
+	res, err := h.svc.IssueMaterials(c, auth.FactoryID(c), id, auth.UserID(c), time.Now())
 	if err != nil {
 		httpx.Fail(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"issuedLines": n})
+	c.JSON(http.StatusOK, res)
 }
 
 type scanRequest struct {
