@@ -29,7 +29,11 @@ func (h *Handler) Register(scoped *gin.RouterGroup) {
 	scoped.GET("/work-orders", auth.Require("wo:view"), h.listWorkOrders)
 	scoped.POST("/work-orders/:id/release", auth.Require("wo:release"), h.release)
 	scoped.POST("/work-orders/:id/issue", auth.Require("inventory:edit"), h.issue)
+	scoped.GET("/work-orders/:id/cards", auth.Require("wo:view"), h.cardsForPrint)
+	scoped.POST("/work-orders/:id/cards/printed", auth.Require("wo:release"), h.markPrinted)
 
+	scoped.GET("/station/state", auth.Require("scan:report"), h.stationState)
+	scoped.GET("/cards/:cardNo", auth.Require("scan:report"), h.cardInfo)
 	scoped.POST("/scans", auth.Require("scan:report"), h.scan)
 	scoped.POST("/labor/start", auth.Require("labor:report"), h.startLabor)
 	scoped.POST("/labor/end", auth.Require("labor:report"), h.endLabor)

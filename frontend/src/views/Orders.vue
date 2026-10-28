@@ -61,10 +61,11 @@
         <el-table-column label="完工 / 計畫" width="120" align="right">
           <template #default="{ row }"><span class="num">{{ fmt.int(row.finishedQty) }} / {{ fmt.int(row.plannedQty) }}</span></template>
         </el-table-column>
-        <el-table-column label="操作" width="150">
+        <el-table-column label="操作" width="210">
           <template #default="{ row }">
             <el-button v-if="row.status === 'DRAFT' && session.can('wo:release')" size="small" type="primary" @click="release(row.id)">開立</el-button>
             <el-button v-if="['RELEASED', 'IN_PROGRESS'].includes(row.status) && session.can('inventory:edit')" size="small" @click="issue(row.id)">發料</el-button>
+            <el-button v-if="row.cards" size="small" @click="printCards(row.id)">列印流程卡</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -90,11 +91,14 @@ async function load() {
 async function release(id: string) {
   try {
     const r = await api<{ woNo: string; cards: number; alerts: string[] }>(`/work-orders/${id}/release`, { method: 'POST' })
-    ElMessage.success(`${r.woNo} 已開立，流程卡 ${r.cards} 張${r.alerts.length ? `，缺料預警 ${r.alerts.length} 筆` : ''}`)
+    ElMessage.success(`${r.woNo} 已開立，流程卡 ${r.cards} 張${r.alerts.length ? `，缺料預警 ${r.alerts.length} 筆` : ''}；可按「列印流程卡」`)
     load()
   } catch (e) {
     ElMessage.error((e as Error).message)
   }
+}
+function printCards(id: string) {
+  window.open(`/print/cards/${id}`, '_blank')
 }
 async function issue(id: string) {
   try {

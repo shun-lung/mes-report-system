@@ -9,6 +9,7 @@
       </el-select>
       <span v-else-if="session.factory" class="factory-name">{{ session.factory.code }} {{ session.factory.name }}</span>
       <div class="spacer" />
+      <router-link v-if="session.can('scan:report')" to="/station" class="scan-link">現場掃描</router-link>
       <el-badge :value="pending.length" :hidden="!pending.length" class="bell">
         <el-button size="small" text @click="alertOpen = true">缺料預警</el-button>
       </el-badge>
@@ -93,6 +94,7 @@ watch(() => session.factoryId, checkOnEnter)
 .factory-name { color: var(--text-secondary); }
 .spacer { flex: 1; }
 .user { color: var(--text-secondary); }
+.scan-link { padding: 5px 12px; border-radius: 6px; background: var(--series-1); color: #fff; text-decoration: none; font-size: 13px; }
 .menu-btn { display: none; background: none; border: 0; font-size: 18px; color: var(--text-primary); cursor: pointer; }
 .body { flex: 1; display: flex; min-height: 0; }
 nav {
