@@ -83,10 +83,13 @@ type salesOrderRow struct {
 	ID         uuid.UUID `json:"id"`
 	SONo       string    `json:"soNo"`
 	Status     string    `json:"status"`
+	CustomerID uuid.UUID `json:"customerId"`
 	Customer   string    `json:"customer"`
 	CustomerPO *string   `json:"customerPo"`
+	Note       *string   `json:"note"`
 	OrderDate  time.Time `json:"orderDate"`
 	Lines      []struct {
+		ProductID   uuid.UUID  `json:"productId"`
 		LineNo      int        `json:"lineNo"`
 		ItemNo      string     `json:"itemNo"`
 		ItemName    string     `json:"itemName"`
@@ -101,9 +104,9 @@ type salesOrderRow struct {
 
 func (h *Handler) listSalesOrders(c *gin.Context) {
 	rows, err := h.svc.pool.Query(c, `
-		SELECT so.id, so.so_no, so.status, cu.name, so.customer_po, so.order_date,
+		SELECT so.id, so.so_no, so.status, cu.id, cu.name, so.customer_po, so.note, so.order_date,
 		       (SELECT json_agg(json_build_object(
-		            'lineNo', l.line_no, 'itemNo', p.item_no, 'itemName', p.name, 'qty', l.qty, 'dueDate', l.due_date,
+		            'productId', p.id, 'lineNo', l.line_no, 'itemNo', p.item_no, 'itemName', p.name, 'qty', l.qty, 'dueDate', l.due_date,
 		            'woId', w.id, 'woNo', w.wo_no, 'woStatus', w.status,
 		            'finishedQty', COALESCE((SELECT sum(fp.good_qty) FROM flow_card_progress fp JOIN flow_cards c ON c.id = fp.card_id
 		                                     WHERE c.work_order_id = w.id

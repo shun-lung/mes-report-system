@@ -37,7 +37,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api'
 import { useSession } from '../stores/session'
@@ -79,7 +79,11 @@ function logout() {
   router.push('/login')
 }
 
-onMounted(checkOnEnter)
+onMounted(() => {
+  checkOnEnter()
+  window.addEventListener('mes:alerts-changed', checkOnEnter)
+})
+onUnmounted(() => window.removeEventListener('mes:alerts-changed', checkOnEnter))
 watch(() => session.factoryId, checkOnEnter)
 </script>
 

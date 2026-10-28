@@ -182,6 +182,9 @@ func (s *Service) Release(ctx context.Context, factoryID, woID, userID uuid.UUID
 			return err
 		}
 		res.Alerts, err = checkMaterials(ctx, tx, woID, at)
+		if res.Alerts == nil {
+			res.Alerts = []uuid.UUID{} // 沒有預警時回傳空陣列而非 null
+		}
 		return err
 	})
 	return res, err

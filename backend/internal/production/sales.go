@@ -30,6 +30,9 @@ func (s *Service) CreateSalesOrder(ctx context.Context, factoryID uuid.UUID, in 
 	id := httpx.NewID()
 	var soNo string
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if err := checkCustomer(ctx, tx, factoryID, in.CustomerID); err != nil {
+			return err
+		}
 		day, err := org.LocalDate(ctx, tx, factoryID, at)
 		if err != nil {
 			return err
@@ -44,18 +47,7 @@ func (s *Service) CreateSalesOrder(ctx context.Context, factoryID uuid.UUID, in 
 		if err != nil {
 			return err
 		}
-		for i, l := range in.Lines {
-			due, err := time.Parse(time.DateOnly, l.DueDate)
-			if err != nil {
-				return httpx.Biz("交期格式錯誤：%s", l.DueDate)
-			}
-			if _, err := tx.Exec(ctx, `
-				INSERT INTO sales_order_lines (id, sales_order_id, line_no, product_id, qty, due_date)
-				VALUES ($1, $2, $3, $4, $5, $6)`, httpx.NewID(), id, i+1, l.ProductID, l.Qty, due); err != nil {
-				return err
-			}
-		}
-		return nil
+		return insertLines(ctx, tx, factoryID, id, in.Lines)
 	})
 	return id, soNo, err
 }
