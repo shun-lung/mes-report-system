@@ -42,6 +42,7 @@ const accounts = !isDev ? [] : [
   { role: '生管', email: 'pc@demo.local', password: 'Demo1234!' },
   { role: '倉庫管理', email: 'wh@demo.local', password: 'Demo1234!' },
   { role: '現場組長', email: 'leader@demo.local', password: 'Demo1234!' },
+  { role: '會員', email: 'member@demo.local', password: 'Demo1234!' },
 ]
 
 function pick(a: (typeof accounts)[number]) {

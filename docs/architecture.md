@@ -79,6 +79,11 @@
     - 介面：掃描畫面「拆卡」（在本站拆，拆完開啟列印頁只印原卡與新卡）；製令單「流程卡」視窗（各卡各站進度、拆卡、合併、勾選列印）。列印頁支援 `?cards=a,b` 只印指定卡，子卡標示「拆自」。
     - 權限：現場組長或生管（`scan:report` 或 `wo:edit`）。撤銷上一站回報時若下一站待做量已被拆走，需先合併子卡。
 
+18. **Excel 匯入基本資料**（`internal/importer`，權限 `masterdata:import`）：產品、站點與線別、不良代碼、BOM（含替代料）、途程。流程：下載範本（含範例與「說明」工作表）→ 上傳預覽（逐列標示新增／更新／無變更／錯誤，不寫入）→ 確認匯入（整份檔案單一交易寫入，仍有錯誤則拒絕；同工廠同類型以 advisory lock 排隊；寫入 `audit_logs`）。
+    - 依代碼比對，已存在更新、不存在新增，不刪除既有資料；更新時空白選填欄位沿用原值。只接受 .xlsx，最多 2,000 列、5 MB。
+    - 套用與畫面相同的檢查：條碼唯一、已有 BOM／途程者不可改為材料、BOM 不可循環、途程同站不可重複。途程與生效版本不同時建立新版本並生效。
+    - 角色「會員」：原有業務功能＋Excel 匯入，不含使用者與角色維護（`user:edit`、`role:edit`）。示範帳號 `member@demo.local`。
+
 ## 本機開發
 
 ```bash
@@ -97,7 +102,7 @@ cd frontend && npm install && npm run dev            # 前端 http://127.0.0.1:5
 
 機密放在 `backend/.env`（JWT_SECRET、ADMIN_PASSWORD、DEMO_PASSWORD、STATIC_DIR），已列入 .gitignore。
 
-示範帳號：`admin@example.com`（最高權限）、`pc@demo.local`（生管）、`wh@demo.local`（倉管）、`leader@demo.local`（現場組長）。未設 `.env` 時密碼為 `admin1234` / `Demo1234!`（僅限本機開發）；已設 `.env` 時見 `帳號密碼.local.txt`，可用 `go run ./cmd/setpass` 重設。
+示範帳號：`admin@example.com`（最高權限）、`pc@demo.local`（生管）、`wh@demo.local`（倉管）、`leader@demo.local`（現場組長）、`member@demo.local`（會員）。未設 `.env` 時密碼為 `admin1234` / `Demo1234!`（僅限本機開發）；已設 `.env` 時見 `帳號密碼.local.txt`，可用 `go run ./cmd/setpass` 重設。
 
 ## 雲端 Demo 與切換
 

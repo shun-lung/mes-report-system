@@ -143,6 +143,8 @@ func (d *demo) setupAccess(adminEmail, demoPassword string) {
 			"wh@demo.local", "李倉管", "E2001"},
 		{"LEADER", "現場組長", []string{"station:view", "wo:view", "scan:report", "labor:report", "report:view"},
 			"leader@demo.local", "陳組長", "E3001"},
+		// 會員：原有業務功能＋Excel 匯入基本資料；不含使用者與角色維護
+		{"MEMBER", "會員", memberPerms(all), "member@demo.local", "林會員", "E4001"},
 	}
 	hash, _ := bcrypt.GenerateFromPassword([]byte(demoPassword), bcrypt.DefaultCost)
 	for _, r := range roles {
@@ -164,6 +166,16 @@ func (d *demo) setupAccess(adminEmail, demoPassword string) {
 		d.users[r.code] = userID
 		step("角色「%s」%d 項權限 → %s", r.name, len(r.perms), r.email)
 	}
+}
+
+func memberPerms(all []string) []string {
+	var out []string
+	for _, p := range all {
+		if p != "user:edit" && p != "role:edit" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // ───────────────────────── 基本資料 ─────────────────────────
@@ -593,6 +605,7 @@ func (d *demo) summary(defaultPasswords bool) {
 	fmt.Println("  pc@demo.local      生管")
 	fmt.Println("  wh@demo.local      倉庫管理")
 	fmt.Println("  leader@demo.local  現場組長")
+	fmt.Println("  member@demo.local  會員")
 	if defaultPasswords {
 		fmt.Println("  密碼：admin1234（最高權限）、Demo1234!（其餘）— 僅供本機開發")
 	} else {

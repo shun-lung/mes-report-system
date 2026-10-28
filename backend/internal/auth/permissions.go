@@ -32,6 +32,7 @@ var Catalog = []Permission{
 	{"routing:view", "masterdata", "檢視途程"},
 	{"routing:edit", "masterdata", "維護途程"},
 	{"defect:edit", "masterdata", "維護不良代碼"},
+	{"masterdata:import", "masterdata", "Excel 匯入基本資料"},
 	{"wo:view", "production", "檢視製令單"},
 	{"wo:edit", "production", "維護製令單"},
 	{"wo:release", "production", "開立製令單與列印流程卡"},

@@ -45,6 +45,25 @@ export async function upload<T>(path: string, file: File): Promise<T> {
   return res.json()
 }
 
+// download 下載檔案（需帶登入標頭，無法用一般連結）；檔名取自 Content-Disposition。
+export async function download(path: string, fallbackName: string) {
+  const session = useSession()
+  const res = await fetch('/api' + path, { headers: { Authorization: `Bearer ${session.token}`, 'X-Factory-ID': session.factoryId } })
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}))
+    throw new ApiError(j.error ?? res.statusText, res.status)
+  }
+  const cd = res.headers.get('Content-Disposition') ?? ''
+  const m = /filename\*=UTF-8''([^;]+)/.exec(cd)
+  const name = m ? decodeURIComponent(m[1]) : fallbackName
+  const url = URL.createObjectURL(await res.blob())
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
 export const fmt = {
   int: (v: number) => Math.round(v).toLocaleString('zh-TW'),
   dec: (v: number, d = 1) => v.toLocaleString('zh-TW', { minimumFractionDigits: d, maximumFractionDigits: d }),
