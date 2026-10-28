@@ -1,0 +1,9 @@
+.git
+**/node_modules
+frontend/dist
+backend/bin
+backend/backups
+**/.env
+**/.env.*
+*.local.txt
+**/.DS_Store

@@ -13,3 +13,9 @@ backend/bin/
 .vscode/
 .idea/
 *.log
+
+# 本機帳號密碼紀錄
+*.local.txt
+
+# dbsync 備份
+backend/backups/

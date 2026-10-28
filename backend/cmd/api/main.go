@@ -11,6 +11,7 @@ import (
 	"mes/internal/config"
 	"mes/internal/dashboard"
 	"mes/internal/database"
+	"mes/internal/httpx"
 	"mes/internal/inventory"
 	"mes/internal/org"
 	"mes/internal/production"
@@ -48,6 +49,11 @@ func main() {
 	production.NewHandler(production.NewService(pool)).Register(scoped)
 	inventory.NewHandler(pool).Register(scoped)
 	dashboard.NewHandler(pool).Register(scoped)
+
+	if cfg.StaticDir != "" {
+		r.NoRoute(httpx.SPA(cfg.StaticDir))
+		log.Printf("serving frontend from %s", cfg.StaticDir)
+	}
 
 	log.Printf("listening on %s", cfg.HTTPAddr)
 	if err := r.Run(cfg.HTTPAddr); err != nil {

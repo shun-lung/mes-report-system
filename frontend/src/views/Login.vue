@@ -13,7 +13,7 @@
         <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon class="err" />
         <el-button type="primary" size="large" :loading="loading" class="submit" @click="submit">登入</el-button>
       </el-form>
-      <div class="demo">
+      <div v-if="isDev" class="demo">
         <div class="muted">示範帳號（點選帶入）</div>
         <button v-for="a in accounts" :key="a.email" type="button" class="acct" @click="pick(a)">
           <b>{{ a.role }}</b><span>{{ a.email }}</span>
@@ -30,12 +30,14 @@ import { useSession } from '../stores/session'
 
 const session = useSession()
 const router = useRouter()
-const email = ref('pc@demo.local')
-const password = ref('Demo1234!')
+// 示範帳號只在本機開發模式顯示與預填；正式建置不含
+const isDev = import.meta.env.DEV
+const email = ref(isDev ? 'pc@demo.local' : '')
+const password = ref(isDev ? 'Demo1234!' : '')
 const loading = ref(false)
 const error = ref('')
 
-const accounts = [
+const accounts = !isDev ? [] : [
   { role: '最高權限', email: 'admin@example.com', password: 'admin1234' },
   { role: '生管', email: 'pc@demo.local', password: 'Demo1234!' },
   { role: '倉庫管理', email: 'wh@demo.local', password: 'Demo1234!' },

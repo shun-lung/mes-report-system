@@ -61,7 +61,55 @@ cd backend && go run ./cmd/api                       # API 127.0.0.1:8080
 cd frontend && npm install && npm run dev            # 前端 http://127.0.0.1:5173
 ```
 
-示範帳號：`admin@example.com / admin1234`（最高權限）、`pc@demo.local`（生管）、`wh@demo.local`（倉管）、`leader@demo.local`（現場組長），後三者密碼 `Demo1234!`。
+對外測試（Cloudflare 快速通道，免費、免網域，網址每次啟動會變）：
+
+```bash
+./scripts/start-public.sh            # 啟動資料庫 + API（含網頁）+ 通道，印出 https://xxxx.trycloudflare.com
+./scripts/start-public.sh --build    # 改過前端後，先重新建置
+```
+
+機密放在 `backend/.env`（JWT_SECRET、ADMIN_PASSWORD、DEMO_PASSWORD、STATIC_DIR），已列入 .gitignore。
+
+示範帳號：`admin@example.com`（最高權限）、`pc@demo.local`（生管）、`wh@demo.local`（倉管）、`leader@demo.local`（現場組長）。未設 `.env` 時密碼為 `admin1234` / `Demo1234!`（僅限本機開發）；已設 `.env` 時見 `帳號密碼.local.txt`，可用 `go run ./cmd/setpass` 重設。
+
+## 雲端 Demo 與切換
+
+Supabase 就是雲端代管的 PostgreSQL，沿用同一份 migration 與同一支 Go 程式；資料庫沒有被換掉，只是換了放的位置。
+
+```
+本地（正式上線演練）              雲端 Demo（Mac 可關機）
+Mac: Docker PostgreSQL           Supabase: PostgreSQL（Session pooler）
+     Go API（含網頁）       ⇄      Render: Go API（含網頁，Dockerfile）
+              └──── cmd/dbsync：整份結構＋資料雙向複製、核對 ────┘
+```
+
+**切換程式連哪個資料庫**：`ENV_FILE` 指定設定檔（預設 `.env`）。
+
+```bash
+cd backend
+go run ./cmd/api                               # 本地資料庫（.env）
+ENV_FILE=.env.supabase go run ./cmd/api        # 雲端資料庫
+ENV_FILE=.env.supabase go run ./cmd/demo       # 在雲端重建示範資料（刷新「今天」）
+```
+
+**搬移資料**：`cmd/dbsync`，一次一個方向整份複製，不做持續同步。
+
+```bash
+go run ./cmd/dbsync -from .env -to .env.supabase -dry-run   # 只列兩邊各表筆數
+go run ./cmd/dbsync -from .env -to .env.supabase -yes       # 本地 → 雲端
+go run ./cmd/dbsync -from .env.supabase -to .env -yes       # 雲端 → 本地
+```
+
+- 兩邊先套用最新 migration；覆蓋前把目標備份成 CSV（`backend/backups/`）。
+- 目標端在單一交易內清空再依外鍵順序複製，中途失敗整筆還原，目標不變。
+- 完成後逐表比對筆數與內容雜湊，並檢查庫存餘額 = 流水帳加總。
+- 複製期間請先停止來源端的 API，避免資料寫到一半。
+
+**部署（Render）**：repo 根目錄的 `Dockerfile` 會建置前端、編譯 Go，產生單一映像。環境變數：`DATABASE_URL`（Supabase Session pooler）、`JWT_SECRET`、`ADMIN_PASSWORD`、`DEMO_PASSWORD`；`PORT` 由 Render 提供。
+
+**Supabase 安全**：migration `00003` 對所有資料表啟用 RLS 且不建 policy，Supabase Data API 用匿名金鑰讀不到資料；Go 以資料表擁有者連線，不受影響。
+
+**免費版限制**：Render 閒置 15 分鐘會休眠，第一個人打開要等約 30–60 秒；Supabase 7 天沒有使用會暫停，需到後台恢復。
 
 API 慣例：`Authorization: Bearer <token>`；工廠範圍的 API 需帶 `X-Factory-ID`。
 

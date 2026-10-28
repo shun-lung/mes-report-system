@@ -27,8 +27,6 @@ import (
 	"mes/internal/production"
 )
 
-const demoPassword = "Demo1234!"
-
 type demo struct {
 	ctx     context.Context
 	pool    *pgxpool.Pool
@@ -78,11 +76,11 @@ func main() {
 	d.must(d.exec(`TRUNCATE factories, users, permissions, audit_logs CASCADE`))
 	d.must(auth.Seed(ctx, pool, cfg.AdminEmail, cfg.AdminPassword))
 	d.setupOrg()
-	d.setupAccess(cfg.AdminEmail)
+	d.setupAccess(cfg.AdminEmail, cfg.DemoPassword)
 	d.setupMasterData()
 	d.orderFlow()
 	d.simulate(now)
-	d.summary()
+	d.summary(cfg.AdminPassword == "admin1234" && cfg.DemoPassword == "Demo1234!")
 }
 
 func (d *demo) exec(sql string, args ...any) error {
@@ -123,7 +121,7 @@ func (d *demo) setupOrg() {
 	step("工廠 TW1 台灣一廠（Asia/Taipei），三班制：早班 08–16、中班 16–24、夜班 00–08（算前一天）")
 }
 
-func (d *demo) setupAccess(adminEmail string) {
+func (d *demo) setupAccess(adminEmail, demoPassword string) {
 	all := make([]string, len(auth.Catalog))
 	for i, p := range auth.Catalog {
 		all[i] = p.Code
@@ -430,21 +428,16 @@ type simLine struct {
 
 var defectRate = map[string]float64{"PREP": 0.008, "SEW": 0.03, "FORM": 0.025, "FIN": 0.012}
 
+// simulate 模擬早班（最多 8 小時）的現場作業；班別結束時全部下工，之後的班別保持空白。
 func (d *demo) simulate(now time.Time) {
+	end := now
+	if shiftEnd := d.start.Add(8 * time.Hour); end.After(shiftEnd) {
+		end = shiftEnd
+	}
 	held := map[string]*simLine{}
 	scans := 0
 	tick := 5 * time.Minute
-	for t := d.start; t.Add(tick).Before(now); t = t.Add(tick) {
-		// 跨班：同製令重新上工，工時歸屬新班別
-		if t != d.start && (t.Sub(d.start)%(8*time.Hour) == 0) {
-			for _, l := range d.lines {
-				if !l.working || l.finished {
-					continue
-				}
-				_, err := d.svc.StartLabor(d.ctx, d.factory, l.id, l.wo, l.headcount, d.users["LEADER"], t)
-				d.must(err)
-			}
-		}
+	for t := d.start; t.Add(tick).Before(end); t = t.Add(tick) {
 		for _, l := range d.lines {
 			if l.finished || t.Before(l.onAt) {
 				continue
@@ -505,7 +498,14 @@ func (d *demo) simulate(now time.Time) {
 			l.nextBatch = 15 + d.rng.Float64()*20
 		}
 	}
-	step("08:00–%s 模擬 12 條線每 5 分鐘作業，共 %d 筆掃描回報", now.Format("15:04"), scans)
+	if end.Before(now) {
+		for _, l := range d.lines {
+			if l.working && !l.finished {
+				d.must(d.svc.EndLabor(d.ctx, d.factory, l.id, d.users["LEADER"], end))
+			}
+		}
+	}
+	step("%s 08:00–%s 模擬 12 條線每 5 分鐘作業，共 %d 筆掃描回報", d.start.Format("01/02"), end.Format("15:04"), scans)
 }
 
 // pickCard 取得線別要做的流程卡；本製令在本站已做完且上游也沒有在途量時，換到下一張有量的製令。
@@ -571,7 +571,7 @@ func (d *demo) pickCard(l *simLine, held map[string]*simLine, t time.Time) (stri
 	return "", 0
 }
 
-func (d *demo) summary() {
+func (d *demo) summary(defaultPasswords bool) {
 	fmt.Println("\n── 製令現況 ──")
 	rows, err := d.pool.Query(d.ctx, `
 		SELECT w.wo_no, p.item_no, p.name, w.status, w.planned_qty,
@@ -588,8 +588,13 @@ func (d *demo) summary() {
 	d.must(rows.Err())
 
 	fmt.Println("\n── 登入帳號 ──")
-	fmt.Println("  admin@example.com / admin1234   最高權限（總部管理員）")
-	fmt.Printf("  pc@demo.local     / %s   生管\n", demoPassword)
-	fmt.Printf("  wh@demo.local     / %s   倉庫管理\n", demoPassword)
-	fmt.Printf("  leader@demo.local / %s   現場組長\n", demoPassword)
+	fmt.Println("  admin@example.com  最高權限（總部管理員）")
+	fmt.Println("  pc@demo.local      生管")
+	fmt.Println("  wh@demo.local      倉庫管理")
+	fmt.Println("  leader@demo.local  現場組長")
+	if defaultPasswords {
+		fmt.Println("  密碼：admin1234（最高權限）、Demo1234!（其餘）— 僅供本機開發")
+	} else {
+		fmt.Println("  密碼：依 .env 的 ADMIN_PASSWORD / DEMO_PASSWORD；個別帳號可用 go run ./cmd/setpass 重設")
+	}
 }
