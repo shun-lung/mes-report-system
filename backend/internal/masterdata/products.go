@@ -29,21 +29,40 @@ type Product struct {
 	PrimaryImageID      *uuid.UUID `json:"primaryImageId"`
 	BOMLines            int        `json:"bomLines"`
 	ActiveRouting       *int       `json:"activeRoutingVersion"`
+	DefaultSupplierID   *uuid.UUID `json:"defaultSupplierId"`
+	DefaultSupplier     *string    `json:"defaultSupplier"`
 	UpdatedAt           time.Time  `json:"updatedAt"`
 }
 
+// supplierInFactory 確認供應商屬於本工廠（nil 視為未指定，直接通過）。
+func (h *Handler) supplierInFactory(c *gin.Context, id *uuid.UUID) bool {
+	if id == nil {
+		return true
+	}
+	var ok bool
+	if err := h.pool.QueryRow(c, `SELECT EXISTS (SELECT 1 FROM suppliers WHERE id = $1 AND factory_id = $2)`, *id, auth.FactoryID(c)).Scan(&ok); err != nil {
+		httpx.DBError(c, err)
+		return false
+	}
+	if !ok {
+		httpx.Fail(c, httpx.Biz("供應商不存在"))
+	}
+	return ok
+}
+
 type productInput struct {
-	ItemNo              string  `json:"itemNo" binding:"required,max=50"`
-	Name                string  `json:"name" binding:"required,max=200"`
-	Barcode             string  `json:"barcode" binding:"max=100"`
-	Spec                string  `json:"spec"`
-	Unit                string  `json:"unit" binding:"required,max=10"`
-	Category            string  `json:"category" binding:"required,oneof=FG SFG RAW AUX"`
-	DefaultDeductTiming string  `json:"defaultDeductTiming" binding:"required,oneof=ON_ARRIVAL ON_ISSUE"`
-	SafetyStock         float64 `json:"safetyStock" binding:"gte=0"`
-	AlertPct            float64 `json:"alertPct" binding:"gte=0,lte=100"`
-	CardQty             int     `json:"cardQty" binding:"gte=1"`
-	IsActive            *bool   `json:"isActive"`
+	ItemNo              string     `json:"itemNo" binding:"required,max=50"`
+	Name                string     `json:"name" binding:"required,max=200"`
+	Barcode             string     `json:"barcode" binding:"max=100"`
+	Spec                string     `json:"spec"`
+	Unit                string     `json:"unit" binding:"required,max=10"`
+	Category            string     `json:"category" binding:"required,oneof=FG SFG RAW AUX"`
+	DefaultDeductTiming string     `json:"defaultDeductTiming" binding:"required,oneof=ON_ARRIVAL ON_ISSUE"`
+	SafetyStock         float64    `json:"safetyStock" binding:"gte=0"`
+	AlertPct            float64    `json:"alertPct" binding:"gte=0,lte=100"`
+	CardQty             int        `json:"cardQty" binding:"gte=1"`
+	IsActive            *bool      `json:"isActive"`
+	DefaultSupplierID   *uuid.UUID `json:"defaultSupplierId"`
 }
 
 const productSelect = `
@@ -52,6 +71,7 @@ const productSelect = `
 	       (SELECT i.id FROM product_images i WHERE i.product_id = p.id ORDER BY i.is_primary DESC, i.sort_order, i.created_at LIMIT 1),
 	       (SELECT count(*) FROM product_bom b WHERE b.parent_product_id = p.id)::int,
 	       (SELECT r.version FROM routings r WHERE r.product_id = p.id AND r.is_active),
+	       p.default_supplier_id, (SELECT s.name FROM suppliers s WHERE s.id = p.default_supplier_id),
 	       p.updated_at
 	FROM products p`
 
@@ -115,16 +135,16 @@ func (h *Handler) getProduct(c *gin.Context) {
 
 func (h *Handler) createProduct(c *gin.Context) {
 	var in productInput
-	if !httpx.Bind(c, &in) {
+	if !httpx.Bind(c, &in) || !h.supplierInFactory(c, in.DefaultSupplierID) {
 		return
 	}
 	id := httpx.NewID()
 	_, err := h.pool.Exec(c, `
 		INSERT INTO products (id, factory_id, item_no, name, barcode, spec, unit, category, default_deduct_timing,
-			safety_stock, alert_pct, card_qty, is_active)
-		VALUES ($1, $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''), $7, $8, $9, $10, $11, $12, $13)`,
+			safety_stock, alert_pct, card_qty, is_active, default_supplier_id)
+		VALUES ($1, $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''), $7, $8, $9, $10, $11, $12, $13, $14)`,
 		id, auth.FactoryID(c), strings.TrimSpace(in.ItemNo), in.Name, strings.TrimSpace(in.Barcode), in.Spec, in.Unit,
-		in.Category, in.DefaultDeductTiming, in.SafetyStock, in.AlertPct, in.CardQty, active(in.IsActive))
+		in.Category, in.DefaultDeductTiming, in.SafetyStock, in.AlertPct, in.CardQty, active(in.IsActive), in.DefaultSupplierID)
 	if err != nil {
 		httpx.DBError(c, err)
 		return
@@ -138,7 +158,7 @@ func (h *Handler) updateProduct(c *gin.Context) {
 		return
 	}
 	var in productInput
-	if !httpx.Bind(c, &in) {
+	if !httpx.Bind(c, &in) || !h.supplierInFactory(c, in.DefaultSupplierID) {
 		return
 	}
 	// 已有 BOM 或途程的成品／半成品，不可改成材料類（會使 BOM 與途程失去意義）
@@ -158,10 +178,10 @@ func (h *Handler) updateProduct(c *gin.Context) {
 	tag, err := h.pool.Exec(c, `
 		UPDATE products SET item_no = $3, name = $4, barcode = NULLIF($5, ''), spec = NULLIF($6, ''), unit = $7,
 		       category = $8, default_deduct_timing = $9, safety_stock = $10, alert_pct = $11, card_qty = $12,
-		       is_active = $13, updated_at = now()
+		       is_active = $13, default_supplier_id = $14, updated_at = now()
 		WHERE id = $1 AND factory_id = $2`,
 		id, auth.FactoryID(c), strings.TrimSpace(in.ItemNo), in.Name, strings.TrimSpace(in.Barcode), in.Spec, in.Unit,
-		in.Category, in.DefaultDeductTiming, in.SafetyStock, in.AlertPct, in.CardQty, active(in.IsActive))
+		in.Category, in.DefaultDeductTiming, in.SafetyStock, in.AlertPct, in.CardQty, active(in.IsActive), in.DefaultSupplierID)
 	if err != nil {
 		httpx.DBError(c, err)
 		return

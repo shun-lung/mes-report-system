@@ -14,5 +14,7 @@ export interface Product {
   primaryImageId: string | null
   bomLines: number
   activeRoutingVersion: number | null
+  defaultSupplierId: string | null
+  defaultSupplier: string | null
 }
 export interface Station { id: string; code: string; name: string; isActive: boolean }

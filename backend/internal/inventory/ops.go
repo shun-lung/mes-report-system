@@ -333,10 +333,12 @@ func (h *Handler) reverse(c *gin.Context) {
 				qty                    float64
 				woID                   *uuid.UUID
 				legType                string
+				refType                *string
+				refID                  *uuid.UUID
 			}
 			if err := tx.QueryRow(ctx, `
-				SELECT txn_no, warehouse_id, product_id, qty, work_order_id, txn_type FROM inventory_transactions WHERE id = $1`, leg).
-				Scan(&t.no, &t.warehouseID, &t.productID, &t.qty, &t.woID, &t.legType); err != nil {
+				SELECT txn_no, warehouse_id, product_id, qty, work_order_id, txn_type, ref_type, ref_id FROM inventory_transactions WHERE id = $1`, leg).
+				Scan(&t.no, &t.warehouseID, &t.productID, &t.qty, &t.woID, &t.legType, &t.refType, &t.refID); err != nil {
 				return err
 			}
 			note := "沖銷 " + t.no
@@ -357,6 +359,11 @@ func (h *Handler) reverse(c *gin.Context) {
 			if err := op.post(ctx, tx, "REVERSAL", t.warehouseID, t.productID, -t.qty, t.woID, "reversal", note, &leg); err != nil {
 				return err
 			}
+			if t.legType == "RECEIPT" && t.refType != nil && *t.refType == "po_line" && t.refID != nil {
+				if err := unreceive(ctx, tx, *t.refID, t.qty, op.at); err != nil {
+					return err
+				}
+			}
 			if t.legType == "ISSUE" && t.woID != nil {
 				if err := addIssued(ctx, tx, *t.woID, t.productID, t.qty); err != nil { // t.qty 為負，扣回已發
 					return err
@@ -365,6 +372,24 @@ func (h *Handler) reverse(c *gin.Context) {
 		}
 		return nil
 	})
+}
+
+// unreceive 沖銷採購收料：扣回採購單明細已到數量並重算採購單狀態。
+func unreceive(ctx context.Context, tx pgx.Tx, lineID uuid.UUID, qty float64, at time.Time) error {
+	var poID uuid.UUID
+	if err := tx.QueryRow(ctx, `
+		UPDATE purchase_order_lines SET received_qty = GREATEST(received_qty - $2, 0) WHERE id = $1 RETURNING po_id`,
+		lineID, qty).Scan(&poID); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `
+		UPDATE purchase_orders SET status = CASE
+			WHEN NOT EXISTS (SELECT 1 FROM purchase_order_lines WHERE po_id = $1 AND received_qty < qty) THEN 'RECEIVED'
+			WHEN EXISTS (SELECT 1 FROM purchase_order_lines WHERE po_id = $1 AND received_qty > 0) THEN 'PARTIAL'
+			ELSE 'ORDERED' END,
+			updated_at = $2
+		WHERE id = $1 AND status IN ('ORDERED','PARTIAL','RECEIVED')`, poID, at)
+	return err
 }
 
 type woMaterial struct {

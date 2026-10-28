@@ -27,6 +27,12 @@
             <el-input-number v-model="form.alertPct" :min="0" :max="100" :precision="1" /> <span class="unit">%</span>
             <div class="hint">可用量低於需求 ×（1 + 緩衝%）時預警</div>
           </el-form-item>
+          <el-form-item label="預設供應商">
+            <el-select v-model="form.defaultSupplierId" clearable filterable placeholder="外購料件建議設定" class="w-sup">
+              <el-option v-for="s in suppliers" :key="s.id" :label="`${s.code} ${s.name}`" :value="s.id" />
+            </el-select>
+            <div class="hint">材料缺料時，系統自動加入此供應商的採購單草稿</div>
+          </el-form-item>
           <el-form-item label="安全庫存"><el-input-number v-model="form.safetyStock" :min="0" /> <span class="unit">參考用</span></el-form-item>
           <el-form-item label="使用中"><el-switch v-model="form.isActive" /></el-form-item>
           <el-form-item v-if="canEdit">
@@ -69,11 +75,12 @@ const saving = ref(false)
 const images = ref<Image[]>([])
 const blank = () => ({
   itemNo: '', name: '', barcode: '', spec: '', unit: '雙', category: 'FG', defaultDeductTiming: 'ON_ISSUE',
-  safetyStock: 0, alertPct: 3, cardQty: 100, isActive: true,
+  safetyStock: 0, alertPct: 3, cardQty: 100, isActive: true, defaultSupplierId: null as string | null,
 })
 const form = ref(blank())
 const isMade = computed(() => form.value.category === 'FG' || form.value.category === 'SFG')
 const title = computed(() => (id.value ? `${form.value.itemNo} ${form.value.name}` : '新增產品'))
+const suppliers = ref<{ id: string; code: string; name: string; isActive: boolean }[]>([])
 const drawerSize = computed(() => (window.innerWidth < 760 ? '100%' : '760px'))
 
 async function reload() {
@@ -83,6 +90,7 @@ async function reload() {
   form.value = {
     itemNo: p.itemNo, name: p.name, barcode: p.barcode ?? '', spec: p.spec ?? '', unit: p.unit, category: p.category,
     defaultDeductTiming: p.defaultDeductTiming, safetyStock: p.safetyStock, alertPct: p.alertPct, cardQty: p.cardQty, isActive: p.isActive,
+    defaultSupplierId: p.defaultSupplierId,
   }
   images.value = res.images
 }
@@ -92,6 +100,8 @@ watch(
   () => {
     if (!props.modelValue) return
     id.value = props.productId
+    if (!suppliers.value.length && (session.can('product:edit') || session.can('purchase:view')))
+      api<typeof suppliers.value>('/suppliers').then((l) => (suppliers.value = l.filter((s) => s.isActive))).catch(() => {})
     tab.value = 'basic'
     images.value = []
     form.value = blank()
@@ -123,4 +133,5 @@ async function save() {
 .hint { width: 100%; font-size: 12px; color: var(--text-muted); line-height: 1.5; margin-top: 2px; }
 .unit { margin-left: 8px; color: var(--text-muted); }
 .w-short { width: 120px; }
+.w-sup { width: min(280px, 100%); }
 </style>

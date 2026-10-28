@@ -27,10 +27,11 @@ var productSheet = &Sheet{
 		{"alertPct", "預警緩衝%", false, "缺料預警緩衝（新增時預設 3）"},
 		{"safety", "安全庫存", false, "參考用（新增時預設 0）"},
 		{"active", "使用中", false, "是／否（新增時預設 是）"},
+		{"supplier", "預設供應商代碼", false, "需已存在；材料缺料時自動請購會用此供應商"},
 	},
 	Examples: [][]string{
-		{"SL-003", "EVA 一字拖鞋-藍", "成品", "雙", "4712345000035", "EVA 一體大底／布面一字帶", "出庫扣帳", "100", "3", "0", "是"},
-		{"SO-BL", "EVA 大底-藍", "基本材料", "雙", "4712345200046", "EVA 射出大底", "到站扣帳", "", "", "500", "是"},
+		{"SL-003", "EVA 一字拖鞋-藍", "成品", "雙", "4712345000035", "EVA 一體大底／布面一字帶", "出庫扣帳", "100", "3", "0", "是", ""},
+		{"SO-BL", "EVA 大底-藍", "基本材料", "雙", "4712345200046", "EVA 射出大底", "到站扣帳", "", "", "500", "是", "S002"},
 	},
 }
 
@@ -39,6 +40,7 @@ type productVals struct {
 	safety, alertPct                            float64
 	cardQty                                     int
 	active                                      bool
+	supplier                                    *uuid.UUID
 }
 
 func planProducts(ctx context.Context, q database.Querier, factoryID uuid.UUID, rows []Row) (*Plan, error) {
@@ -51,7 +53,7 @@ func planProducts(ctx context.Context, q database.Querier, factoryID uuid.UUID, 
 	barcodeOwner := map[string]string{}
 	dbRows, err := q.Query(ctx, `
 		SELECT p.id, p.item_no, p.name, COALESCE(p.barcode, ''), COALESCE(p.spec, ''), p.unit, p.category,
-		       p.default_deduct_timing, p.safety_stock, p.alert_pct, p.card_qty, p.is_active,
+		       p.default_deduct_timing, p.safety_stock, p.alert_pct, p.card_qty, p.is_active, p.default_supplier_id,
 		       EXISTS (SELECT 1 FROM product_bom b WHERE b.parent_product_id = p.id)
 		       OR EXISTS (SELECT 1 FROM routings r WHERE r.product_id = p.id)
 		FROM products p WHERE p.factory_id = $1`, factoryID)
@@ -62,7 +64,7 @@ func planProducts(ctx context.Context, q database.Querier, factoryID uuid.UUID, 
 		var itemNo string
 		e := &existing{}
 		if err := dbRows.Scan(&e.id, &itemNo, &e.v.name, &e.v.barcode, &e.v.spec, &e.v.unit, &e.v.category, &e.v.timing,
-			&e.v.safety, &e.v.alertPct, &e.v.cardQty, &e.v.active, &e.used); err != nil {
+			&e.v.safety, &e.v.alertPct, &e.v.cardQty, &e.v.active, &e.v.supplier, &e.used); err != nil {
 			return nil, err
 		}
 		ex[itemNo] = e
@@ -71,6 +73,11 @@ func planProducts(ctx context.Context, q database.Querier, factoryID uuid.UUID, 
 		}
 	}
 	if err := dbRows.Err(); err != nil {
+		return nil, err
+	}
+
+	suppliers, err := codeMap(ctx, q, `SELECT code, id FROM suppliers WHERE factory_id = $1`, factoryID)
+	if err != nil {
 		return nil, err
 	}
 
@@ -131,6 +138,13 @@ func planProducts(ctx context.Context, q database.Querier, factoryID uuid.UUID, 
 		if b := parseBool(r, "active", "使用中", &e); b != nil {
 			v.active = *b
 		}
+		if sc := r.get("supplier"); sc != "" {
+			if id, ok := suppliers[sc]; ok {
+				v.supplier = &id
+			} else {
+				e.add("供應商代碼「%s」不存在", sc)
+			}
+		}
 		if len([]rune(v.unit)) > 10 {
 			e.add("「單位」最多 10 個字")
 		}
@@ -169,19 +183,20 @@ func planProducts(ctx context.Context, q database.Querier, factoryID uuid.UUID, 
 			if it.create {
 				if _, err := tx.Exec(ctx, `
 					INSERT INTO products (id, factory_id, item_no, name, barcode, spec, unit, category, default_deduct_timing,
-						safety_stock, alert_pct, card_qty, is_active)
-					VALUES ($1, $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''), $7, $8, $9, $10, $11, $12, $13)`,
+						safety_stock, alert_pct, card_qty, is_active, default_supplier_id)
+					VALUES ($1, $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''), $7, $8, $9, $10, $11, $12, $13, $14)`,
 					it.id, factoryID, it.itemNo, v.name, v.barcode, v.spec, v.unit, v.category, v.timing,
-					v.safety, v.alertPct, v.cardQty, v.active); err != nil {
+					v.safety, v.alertPct, v.cardQty, v.active, v.supplier); err != nil {
 					return err
 				}
 				continue
 			}
 			if _, err := tx.Exec(ctx, `
 				UPDATE products SET name = $2, barcode = NULLIF($3, ''), spec = NULLIF($4, ''), unit = $5, category = $6,
-				       default_deduct_timing = $7, safety_stock = $8, alert_pct = $9, card_qty = $10, is_active = $11, updated_at = now()
+				       default_deduct_timing = $7, safety_stock = $8, alert_pct = $9, card_qty = $10, is_active = $11,
+				       default_supplier_id = $12, updated_at = now()
 				WHERE id = $1`,
-				it.id, v.name, v.barcode, v.spec, v.unit, v.category, v.timing, v.safety, v.alertPct, v.cardQty, v.active); err != nil {
+				it.id, v.name, v.barcode, v.spec, v.unit, v.category, v.timing, v.safety, v.alertPct, v.cardQty, v.active, v.supplier); err != nil {
 				return err
 			}
 		}
@@ -207,5 +222,6 @@ func diffProduct(a, b productVals) []string {
 	add(a.alertPct != b.alertPct, "預警緩衝")
 	add(a.safety != b.safety, "安全庫存")
 	add(a.active != b.active, "使用中")
+	add(!sameID(a.supplier, b.supplier), "預設供應商")
 	return c
 }

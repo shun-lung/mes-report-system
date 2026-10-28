@@ -25,6 +25,7 @@ import (
 	"mes/internal/inventory"
 	"mes/internal/org"
 	"mes/internal/production"
+	"mes/internal/purchasing"
 )
 
 type demo struct {
@@ -136,10 +137,10 @@ func (d *demo) setupAccess(adminEmail, demoPassword string) {
 	}{
 		{"ADMIN", "最高權限", all, adminEmail, "", ""},
 		{"PC", "生管", []string{"station:view", "product:view", "bom:view", "routing:view",
-			"wo:view", "wo:edit", "wo:release", "alert:decide", "inventory:view", "report:view"},
+			"wo:view", "wo:edit", "wo:release", "alert:decide", "inventory:view", "report:view", "purchase:view", "purchase:edit"},
 			"pc@demo.local", "王生管", "E1001"},
 		{"WH", "倉庫管理", []string{"product:view", "bom:view", "wo:view",
-			"inventory:view", "inventory:edit", "inventory:adjust", "report:view"},
+			"inventory:view", "inventory:edit", "inventory:adjust", "report:view", "purchase:view"},
 			"wh@demo.local", "李倉管", "E2001"},
 		{"LEADER", "現場組長", []string{"station:view", "wo:view", "scan:report", "labor:report", "report:view"},
 			"leader@demo.local", "陳組長", "E3001"},
@@ -234,6 +235,26 @@ func (d *demo) setupMasterData() {
 			id, d.factory, p.itemNo, p.name, p.barcode, p.spec, p.unit, p.category, p.deduct, p.safety))
 	}
 	step("產品 %d 筆：成品 2、半成品 1、基本材料 3、輔助料件 5", len(products))
+
+	// 供應商與材料的預設供應商（材料缺料時自動請購用）
+	for _, sp := range []struct {
+		code, name, contact, phone string
+		lead                       int
+		items                      []string
+	}{
+		{"S001", "長興布業", "張經理", "02-2611-0001", 5, []string{"FB-01"}},
+		{"S002", "永大橡膠", "吳業務", "04-2350-0002", 10, []string{"SO-BK", "SO-WH"}},
+		{"S003", "立邦化工", "林專員", "03-3550-0003", 3, []string{"GL-01", "GL-02"}},
+		{"S004", "順發包材", "陳小姐", "02-2299-0004", 5, []string{"BX-01", "TG-01", "TH-01"}},
+	} {
+		id := httpx.NewID()
+		d.must(d.exec(`INSERT INTO suppliers (id, factory_id, code, name, contact, phone, lead_days) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+			id, d.factory, sp.code, sp.name, sp.contact, sp.phone, sp.lead))
+		for _, item := range sp.items {
+			d.must(d.exec(`UPDATE products SET default_supplier_id = $2 WHERE id = $1`, d.product[item], id))
+		}
+	}
+	step("供應商 4 家，材料皆設定預設供應商")
 
 	bom := func(parent, child, materialType string, qtyPer, scrap float64, station string) uuid.UUID {
 		id := httpx.NewID()
@@ -347,10 +368,15 @@ func (d *demo) orderFlow() {
 
 	wos, err := d.svc.ConvertSalesOrder(d.ctx, d.factory, soID, pc, d.at(-48))
 	d.must(err)
+	var autoPOs []string
 	for i, wo := range wos {
 		res, err := d.svc.Release(d.ctx, d.factory, wo.ID, pc, d.at(-45+i))
 		d.must(err)
 		step("07:%02d 開立製令 %s，產生流程卡 %d 張，觸發缺料預警 %d 筆", 15+i, wo.WONo, res.Cards, len(res.Alerts))
+		for _, po := range res.PurchaseOrders {
+			step("      └ 材料缺料，自動建立採購單草稿 %s", po)
+			autoPOs = append(autoPOs, po)
+		}
 	}
 
 	rows, err := d.pool.Query(d.ctx, `
@@ -394,6 +420,15 @@ func (d *demo) orderFlow() {
 		d.must(err)
 	}
 	step("07:35 李倉管 發料（出庫扣帳）：布料、鞋盒、吊牌")
+
+	// 生管確認自動請購的採購單並下單；保留未到貨，供測試採購收料
+	purch := purchasing.NewService(d.pool)
+	for _, no := range autoPOs {
+		var poID uuid.UUID
+		d.must(d.pool.QueryRow(d.ctx, `SELECT id FROM purchase_orders WHERE po_no = $1`, no).Scan(&poID))
+		d.must(purch.Order(d.ctx, d.factory, poID, d.at(-20)))
+		step("07:40 王生管 確認採購單 %s 並下單（尚未到貨，可測試採購收料）", no)
+	}
 
 	// 上工派線
 	assign := map[string]uuid.UUID{

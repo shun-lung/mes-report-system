@@ -114,6 +114,8 @@ type ReleaseResult struct {
 	WONo   string      `json:"woNo"`
 	Cards  int         `json:"cards"`
 	Alerts []uuid.UUID `json:"alerts"`
+	// 缺料時自動建立／累加的採購單草稿
+	PurchaseOrders []string `json:"purchaseOrders"`
 }
 
 // Release 開立製令：依每卡數量產生流程卡與各站進度，並檢查用料。
@@ -181,10 +183,7 @@ func (s *Service) Release(ctx context.Context, factoryID, woID, userID uuid.UUID
 			UPDATE work_orders SET status = 'RELEASED', released_at = $2, updated_at = $2 WHERE id = $1`, woID, at); err != nil {
 			return err
 		}
-		res.Alerts, err = checkMaterials(ctx, tx, woID, at)
-		if res.Alerts == nil {
-			res.Alerts = []uuid.UUID{} // 沒有預警時回傳空陣列而非 null
-		}
+		res.Alerts, res.PurchaseOrders, err = checkMaterials(ctx, tx, woID, userID, at)
 		return err
 	})
 	return res, err

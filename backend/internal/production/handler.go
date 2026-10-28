@@ -54,6 +54,9 @@ func (h *Handler) Register(scoped *gin.RouterGroup) {
 
 	scoped.GET("/alerts", h.listAlerts)
 	scoped.POST("/alerts/:id/decide", auth.Require("alert:decide"), h.decide)
+	scoped.GET("/shortages", auth.RequireAny("wo:view", "purchase:view", "inventory:view"), h.listShortages)
+	scoped.POST("/shortages/purchase", auth.Require("purchase:edit"), h.purchaseShortages)
+	scoped.POST("/shortages/work-order", auth.Require("wo:edit"), h.workOrderForShortage)
 }
 
 func (h *Handler) createSalesOrder(c *gin.Context) {
@@ -164,7 +167,7 @@ func (h *Handler) endLabor(c *gin.Context) {
 }
 
 type decideRequest struct {
-	Action string `json:"action" binding:"required,oneof=CREATE_WO PASS"`
+	Action string `json:"action" binding:"required,oneof=CREATE_WO CREATE_PO PASS"`
 	Note   string `json:"note"`
 }
 
@@ -199,9 +202,11 @@ type alertRow struct {
 	ShortageQty  float64    `json:"shortageQty"`
 	CanCreateWO  bool       `json:"canCreateWo"`
 	CreatedWONo  *string    `json:"createdWoNo"`
+	CreatedPONo  *string    `json:"createdPoNo"`
 	DecidedBy    *string    `json:"decidedBy"`
 	DecidedAt    *time.Time `json:"decidedAt"`
 	CreatedAt    time.Time  `json:"createdAt"`
+	Note         *string    `json:"note"`
 }
 
 func (h *Handler) listAlerts(c *gin.Context) {
@@ -209,11 +214,12 @@ func (h *Handler) listAlerts(c *gin.Context) {
 		SELECT a.id, a.status, w.wo_no, p.item_no, p.name, p.category, p.unit,
 		       a.required_qty, a.available_qty, a.threshold_qty, a.shortage_qty,
 		       EXISTS (SELECT 1 FROM routings r WHERE r.product_id = p.id AND r.is_active),
-		       cw.wo_no, u.name, a.decided_at, a.created_at
+		       cw.wo_no, cp.po_no, u.name, a.decided_at, a.created_at, a.note
 		FROM material_alerts a
 		JOIN products p ON p.id = a.product_id
 		LEFT JOIN work_orders w ON w.id = a.work_order_id
 		LEFT JOIN work_orders cw ON cw.id = a.created_wo_id
+		LEFT JOIN purchase_orders cp ON cp.id = a.created_po_id
 		LEFT JOIN users u ON u.id = a.decided_by
 		WHERE a.factory_id = $1 AND ($2 = '' OR a.status = $2)
 		ORDER BY a.created_at DESC LIMIT 200`, auth.FactoryID(c), c.Query("status"))

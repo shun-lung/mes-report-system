@@ -17,6 +17,7 @@ import (
 	"mes/internal/masterdata"
 	"mes/internal/org"
 	"mes/internal/production"
+	"mes/internal/purchasing"
 )
 
 func main() {
@@ -50,6 +51,7 @@ func main() {
 	org.NewHandler(pool).Register(secured, scoped)
 	masterdata.NewHandler(pool).Register(api, scoped)
 	importer.NewHandler(pool).Register(scoped)
+	purchasing.NewHandler(purchasing.NewService(pool)).Register(scoped)
 	production.NewHandler(production.NewService(pool)).Register(scoped)
 	inventory.NewHandler(pool).Register(scoped)
 	dashboard.NewHandler(pool).Register(scoped)

@@ -42,6 +42,8 @@ var Catalog = []Permission{
 	{"inventory:edit", "inventory", "入出庫作業"},
 	{"inventory:adjust", "inventory", "庫存調整與沖銷"},
 	{"alert:decide", "inventory", "處理缺料預警"},
+	{"purchase:view", "purchase", "檢視採購單與供應商"},
+	{"purchase:edit", "purchase", "維護採購單與供應商"},
 	{"report:view", "report", "檢視報表"},
 }
 

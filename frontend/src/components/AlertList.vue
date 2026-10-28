@@ -19,18 +19,14 @@
     <el-table-column label="處理" min-width="200">
       <template #default="{ row }">
         <template v-if="row.status === 'PENDING'">
-          <el-tooltip :disabled="row.canCreateWo" content="此料件沒有途程，請通知採購；可先 Pass" placement="top">
-            <span>
-              <el-button size="small" type="primary" :disabled="!row.canCreateWo || !canDecide" :loading="busy === row.id"
-                @click="decide(row, 'CREATE_WO')">通知建單</el-button>
-            </span>
-          </el-tooltip>
+          <el-button v-if="row.canCreateWo" size="small" type="primary" :disabled="!canDecide" :loading="busy === row.id"
+            @click="decide(row, 'CREATE_WO')">通知建單</el-button>
+          <el-button v-else size="small" type="primary" :disabled="!canDecide" :loading="busy === row.id"
+            @click="decide(row, 'CREATE_PO')">建立採購單</el-button>
           <el-button size="small" :disabled="!canDecide" @click="decide(row, 'PASS')">Pass</el-button>
         </template>
         <template v-else>
-          <el-tag :type="row.status === 'CREATED_WO' ? 'success' : 'info'" size="small">
-            {{ row.status === 'CREATED_WO' ? '已建單 ' + row.createdWoNo : '已 Pass' }}
-          </el-tag>
+          <el-tag :type="row.status === 'PASSED' ? 'info' : 'success'" size="small">{{ decidedText(row) }}</el-tag>
           <span class="muted by">{{ row.decidedBy }}</span>
         </template>
       </template>
@@ -57,6 +53,7 @@ export interface Alert {
   shortageQty: number
   canCreateWo: boolean
   createdWoNo: string | null
+  createdPoNo: string | null
   decidedBy: string | null
 }
 
@@ -68,11 +65,21 @@ const busy = ref('')
 const catName: Record<string, string> = { FG: '成品', SFG: '半成品', RAW: '基本材料', AUX: '輔助料件' }
 const qty = (v: number) => fmt.dec(v, v % 1 === 0 ? 0 : 2)
 
-async function decide(row: Alert, action: 'CREATE_WO' | 'PASS') {
+function decidedText(row: Alert) {
+  if (row.status === 'CREATED_WO') return '已建製令 ' + row.createdWoNo
+  if (row.status === 'CREATED_PO') return '已請購 ' + (row.createdPoNo ?? '')
+  return '已 Pass'
+}
+
+async function decide(row: Alert, action: 'CREATE_WO' | 'CREATE_PO' | 'PASS') {
   busy.value = row.id
   try {
-    const res = await api<{ newWorkOrderNo?: string }>(`/alerts/${row.id}/decide`, { method: 'POST', body: { action } })
-    ElMessage.success(action === 'PASS' ? '已 Pass' : `已建立半成品製令 ${res.newWorkOrderNo}（草稿）`)
+    const res = await api<{ newWorkOrderNo?: string; newPurchaseOrderNo?: string }>(`/alerts/${row.id}/decide`, { method: 'POST', body: { action } })
+    ElMessage.success(
+      action === 'PASS' ? '已 Pass'
+        : action === 'CREATE_PO' ? `已加入採購單草稿 ${res.newPurchaseOrderNo}，請到「採購單」確認後下單`
+        : `已建立半成品製令 ${res.newWorkOrderNo}（草稿）`,
+    )
     emit('decided')
   } catch (e) {
     ElMessage.error((e as Error).message)

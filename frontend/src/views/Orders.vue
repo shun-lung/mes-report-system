@@ -235,11 +235,13 @@ async function release(list: { id: string; woNo: string }[]) {
   let cards = 0
   let alerts = 0
   const done: string[] = []
+  const pos: string[] = []
   for (const w of list) {
     try {
-      const r = await api<{ cards: number; alerts: string[] }>(`/work-orders/${w.id}/release`, { method: 'POST' })
+      const r = await api<{ cards: number; alerts: string[]; purchaseOrders: string[] }>(`/work-orders/${w.id}/release`, { method: 'POST' })
       cards += r.cards
       alerts += r.alerts?.length ?? 0
+      for (const po of r.purchaseOrders ?? []) if (!pos.includes(po)) pos.push(po)
       done.push(w.woNo)
     } catch (e) {
       ElMessage.error(`${w.woNo}：${(e as Error).message}`)
@@ -248,7 +250,7 @@ async function release(list: { id: string; woNo: string }[]) {
   await load()
   if (!done.length) return
   ElMessage({ type: alerts ? 'warning' : 'success', duration: 5000,
-    message: `已開立 ${done.length} 張製令、流程卡 ${cards} 張${alerts ? `；觸發缺料預警 ${alerts} 筆，請處理` : ''}` })
+    message: `已開立 ${done.length} 張製令、流程卡 ${cards} 張${alerts ? `；缺料預警 ${alerts} 筆` : ''}${pos.length ? `；材料缺料已自動加入採購單 ${pos.join('、')}` : ''}` })
   if (alerts) alertsChanged()
   else tab.value = 'wo'
 }
