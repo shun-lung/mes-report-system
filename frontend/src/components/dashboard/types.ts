@@ -9,6 +9,7 @@ export interface Line {
 export interface Station {
   id: string; code: string; name: string
   hourly: Cell[]; good: number; defect: number; target: number; targetToDate: number; wip: number
+  isFinal: boolean
   lines: Line[]
 }
 export interface StepProgress { seq: number; station: string; input: number; good: number; defect: number }

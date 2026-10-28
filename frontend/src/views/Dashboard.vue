@@ -92,8 +92,9 @@
           <HourlyGrid :hours="d.hours" :stations="d.stations" :now="d.now" :tz="tz" />
         </div>
         <div class="card">
-          <h3>成品累計完工 <small>{{ lastStation?.name }}站良品</small></h3>
-          <CumulativeChart v-if="lastStation" :hours="d.hours" :cells="lastStation.hourly" :now="d.now" :tz="tz" />
+          <h3>成品累計完工 <small>{{ finalStations.map((s) => s.name).join('、') }}站良品</small></h3>
+          <CumulativeChart v-if="finalStations.length" :hours="d.hours" :cells="finalCells" :now="d.now" :tz="tz" />
+          <el-empty v-else :image-size="48" description="尚無生效的成品途程" />
         </div>
       </div>
 
@@ -222,7 +223,16 @@ let timer: number | undefined
 
 const tz = computed(() => d.value?.factory.timezone ?? 'Asia/Taipei')
 const k = computed(() => d.value!.kpi)
-const lastStation = computed(() => d.value?.stations.at(-1))
+// 完工站可能不只一個（不同成品途程的最後一站），逐小時加總
+const finalStations = computed(() => d.value?.stations.filter((s) => s.isFinal) ?? [])
+const finalCells = computed(() =>
+  d.value!.hours.map((_, i) =>
+    finalStations.value.reduce(
+      (acc, s) => ({ good: acc.good + s.hourly[i].good, defect: acc.defect + s.hourly[i].defect, target: acc.target + s.hourly[i].target }),
+      { good: 0, defect: 0, target: 0 },
+    ),
+  ),
+)
 const fgAtt = computed(() => (k.value.fgTargetToDate >= 10 ? k.value.fgOutput / k.value.fgTargetToDate : null))
 const isCurrent = computed(() => {
   if (!d.value) return false

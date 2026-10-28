@@ -17,9 +17,10 @@
     </header>
     <div class="body">
       <nav :class="{ open: navOpen }" @click="navOpen = false">
-        <router-link v-for="m in menu" :key="m.path" :to="m.path" class="nav-item" active-class="" exact-active-class="active">
-          {{ m.title }}
-        </router-link>
+        <template v-for="(m, i) in menu" :key="m.path">
+          <div v-if="m.group && m.group !== menu[i - 1]?.group" class="nav-group">{{ m.group }}</div>
+          <router-link :to="m.path" class="nav-item" active-class="" exact-active-class="active">{{ m.title }}</router-link>
+        </template>
       </nav>
       <main>
         <el-empty v-if="!session.factory" description="此帳號尚未被指派任何工廠" />
@@ -52,7 +53,7 @@ const menu = computed(() =>
   router.options.routes
     .find((r) => r.path === '/')!
     .children!.filter((c) => !c.meta?.perm || session.can(c.meta.perm as string))
-    .map((c) => ({ path: '/' + c.path, title: c.meta!.title as string })),
+    .map((c) => ({ path: '/' + c.path, title: c.meta!.title as string, group: c.meta!.group as string | undefined })),
 )
 const allowed = computed(() => !route.meta.perm || session.can(route.meta.perm as string))
 
@@ -98,6 +99,7 @@ nav {
   width: 168px; flex: none; padding: 12px 8px; background: var(--surface-1); border-right: 1px solid var(--border);
   display: flex; flex-direction: column; gap: 2px;
 }
+.nav-group { padding: 14px 12px 4px; font-size: 11px; color: var(--text-muted); letter-spacing: 0.5px; }
 .nav-item { padding: 9px 12px; border-radius: 6px; color: var(--text-secondary); text-decoration: none; }
 .nav-item:hover { background: var(--surface-2); color: var(--text-primary); }
 .nav-item.active { background: var(--series-1-soft); color: var(--text-primary); font-weight: 600; }

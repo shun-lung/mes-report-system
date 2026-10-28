@@ -13,6 +13,7 @@ import (
 	"mes/internal/database"
 	"mes/internal/httpx"
 	"mes/internal/inventory"
+	"mes/internal/masterdata"
 	"mes/internal/org"
 	"mes/internal/production"
 )
@@ -46,6 +47,7 @@ func main() {
 	authHandler.Register(api, secured)
 	authHandler.RegisterAdmin(scoped)
 	org.NewHandler(pool).Register(secured, scoped)
+	masterdata.NewHandler(pool).Register(api, scoped)
 	production.NewHandler(production.NewService(pool)).Register(scoped)
 	inventory.NewHandler(pool).Register(scoped)
 	dashboard.NewHandler(pool).Register(scoped)

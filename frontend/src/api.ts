@@ -28,6 +28,23 @@ export async function api<T>(path: string, opts: { method?: string; body?: unkno
   return res.json()
 }
 
+// upload 以 multipart 上傳單一檔案（欄位名稱 file）。
+export async function upload<T>(path: string, file: File): Promise<T> {
+  const session = useSession()
+  const body = new FormData()
+  body.append('file', file)
+  const res = await fetch('/api' + path, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${session.token}`, 'X-Factory-ID': session.factoryId },
+    body,
+  })
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}))
+    throw new ApiError(j.error ?? res.statusText, res.status)
+  }
+  return res.json()
+}
+
 export const fmt = {
   int: (v: number) => Math.round(v).toLocaleString('zh-TW'),
   dec: (v: number, d = 1) => v.toLocaleString('zh-TW', { minimumFractionDigits: d, maximumFractionDigits: d }),

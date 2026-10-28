@@ -65,6 +65,7 @@ type Station struct {
 	Target       float64   `json:"target"`
 	TargetToDate float64   `json:"targetToDate"`
 	WIP          float64   `json:"wip"`
+	IsFinal      bool      `json:"isFinal"` // 成品途程的最後一站（完工站）
 	Lines        []*Line   `json:"lines"`
 }
 
@@ -431,9 +432,30 @@ func (h *Handler) shift(c *gin.Context) {
 	if k.ManHours > 0 {
 		k.Efficiency = k.EarnedHours / k.ManHours
 	}
-	if n := len(res.Stations); n > 0 {
-		k.FGTarget = res.Stations[n-1].Target
-		k.FGTargetToDate = res.Stations[n-1].TargetToDate
+	// 完工站：生效中成品途程的最後一站
+	rows, err = h.pool.Query(c, `
+		SELECT DISTINCT rs.station_id FROM routings r
+		JOIN products p ON p.id = r.product_id AND p.category = 'FG'
+		JOIN routing_steps rs ON rs.routing_id = r.id
+		WHERE r.factory_id = $1 AND r.is_active
+		  AND rs.seq = (SELECT max(seq) FROM routing_steps WHERE routing_id = r.id)`, factoryID)
+	if err != nil {
+		httpx.DBError(c, err)
+		return
+	}
+	finals, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
+	if err != nil {
+		httpx.DBError(c, err)
+		return
+	}
+	for _, st := range res.Stations {
+		for _, id := range finals {
+			if st.ID == id {
+				st.IsFinal = true
+				k.FGTarget += st.Target
+				k.FGTargetToDate += st.TargetToDate
+			}
+		}
 	}
 
 	err = h.pool.QueryRow(c, `
