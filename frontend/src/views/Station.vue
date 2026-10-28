@@ -45,11 +45,13 @@
 
         <section class="panel recent">
           <div class="panel-title">最近回報</div>
-          <div v-for="r in state.recent" :key="r.at + r.cardNo" class="r-row">
+          <div v-for="r in state.recent" :key="r.id" class="r-row" :class="{ reversed: r.reversed, reversal: r.reversalOf }">
             <span class="num muted">{{ time(r.at) }}</span>
             <span class="num">{{ shortCard(r.cardNo) }}</span>
-            <span class="num">+{{ fmt.int(r.good) }}</span>
-            <span v-if="r.defect" class="num bad">✕{{ fmt.int(r.defect) }}</span>
+            <span class="num q">{{ r.good >= 0 ? '+' : '' }}{{ fmt.int(r.good) }}<span v-if="r.defect" class="bad"> ✕{{ fmt.int(Math.abs(r.defect)) }}</span></span>
+            <span v-if="r.reversalOf" class="tag">撤銷</span>
+            <span v-else-if="r.reversed" class="tag muted">已撤銷</span>
+            <button v-else type="button" class="undo" @click="undo(r)">撤銷</button>
           </div>
           <div v-if="!state.recent.length" class="muted">本班尚無回報</div>
         </section>
@@ -149,6 +151,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { ElMessageBox } from 'element-plus'
 import { api, fmt } from '../api'
 import { useSession } from '../stores/session'
 
@@ -157,7 +160,7 @@ interface State {
   line: Line; shift: string; workDate: string
   session: { woId: string; woNo: string; itemNo: string; itemName: string; headcount: number; startedAt: string } | null
   totals: { good: number; defect: number; scans: number }
-  recent: { at: string; cardNo: string; woNo: string; good: number; defect: number; user: string }[]
+  recent: { id: string; at: string; cardNo: string; woNo: string; good: number; defect: number; user: string; reversalOf: string | null; reversed: boolean }[]
   workOrders: { id: string; woNo: string; itemNo: string; itemName: string; plannedQty: number; remaining: number; doneHere: number; upstream: number }[]
 }
 interface Card {
@@ -348,6 +351,24 @@ async function confirm() {
   }
 }
 
+async function undo(r: State['recent'][number]) {
+  try {
+    const { value } = await ElMessageBox.prompt(
+      `撤銷 ${shortCard(r.cardNo)} 的這筆回報（良品 ${fmt.int(r.good)}、不良 ${fmt.int(r.defect)}）？`,
+      '撤銷回報',
+      { confirmButtonText: '撤銷', cancelButtonText: '返回', type: 'warning', inputPlaceholder: '撤銷原因（必填）',
+        inputValidator: (v) => (v && v.trim() ? true : '請填寫撤銷原因') },
+    )
+    const res = await api<{ goodQty: number; remaining: number }>(`/scans/${r.id}/reverse`, { method: 'POST', body: { reason: value.trim() } })
+    show('ok', `✓ 已撤銷 ${shortCard(r.cardNo)}：良品 ${fmt.int(res.goodQty)} 已退回，本站可報 ${fmt.int(res.remaining)}`)
+    clearCard()
+    await loadState()
+  } catch (e) {
+    if (e !== 'cancel' && e !== 'close') show('err', (e as Error).message)
+  }
+  focusScan()
+}
+
 function openLabor(c?: Card, reason = '') {
   const s = state.value?.session
   labor.title = c ? '上工確認' : s ? '換製令／調整人數' : '上工'
@@ -431,7 +452,12 @@ onUnmounted(() => {
 .totals b { font-size: 24px; }
 .bad { color: var(--div-neg-ink); }
 .recent { font-size: 14px; }
-.r-row { display: grid; grid-template-columns: 48px 1fr auto auto; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--grid); }
+.r-row { display: grid; grid-template-columns: 44px 1fr auto 48px; gap: 6px; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--grid); }
+.r-row.reversed .q { text-decoration: line-through; color: var(--text-muted); }
+.r-row.reversal { color: var(--text-secondary); }
+.tag { font-size: 12px; text-align: center; }
+.undo { border: 0; background: transparent; color: var(--div-neg-ink); font: inherit; font-size: 13px; cursor: pointer; padding: 2px 4px; border-radius: 4px; }
+.undo:hover { background: var(--surface-2); }
 
 .main { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .scan-box { display: flex; gap: 10px; }

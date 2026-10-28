@@ -78,6 +78,26 @@ func Require(perm string) gin.HandlerFunc {
 	}
 }
 
+// RequireAny 具備其中任一權限即可（需在 FactoryScope 之後使用）。
+func RequireAny(perms ...string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		for _, p := range perms {
+			if Can(c, p) {
+				c.Next()
+				return
+			}
+		}
+		httpx.Abort(c, http.StatusForbidden, "權限不足："+strings.Join(perms, " 或 "))
+	}
+}
+
+// Can 目前使用者在本工廠是否具備權限。
+func Can(c *gin.Context, perm string) bool {
+	perms, _ := c.Get(ctxPermissions)
+	m, ok := perms.(map[string]bool)
+	return ok && m[perm]
+}
+
 func RequireSuperAdmin() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !IsSuperAdmin(c) {

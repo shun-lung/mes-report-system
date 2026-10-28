@@ -13,6 +13,7 @@ export const router = createRouter({
       children: [
         { path: '', component: () => import('./views/Dashboard.vue'), meta: { title: '生產 8HR 看板', perm: 'report:view' } },
         { path: 'orders', component: () => import('./views/Orders.vue'), meta: { title: '訂單與製令', perm: 'wo:view' } },
+        { path: 'scans', component: () => import('./views/ScanHistory.vue'), meta: { title: '回報紀錄', perm: 'wo:view' } },
         { path: 'products', component: () => import('./views/master/Products.vue'), meta: { title: '產品資料', perm: 'product:view', group: '基本資料' } },
         { path: 'stations', component: () => import('./views/master/Stations.vue'), meta: { title: '站點與線別', perm: 'station:view', group: '基本資料' } },
         { path: 'defects', component: () => import('./views/master/DefectCodes.vue'), meta: { title: '不良代碼', perm: 'station:view', group: '基本資料' } },

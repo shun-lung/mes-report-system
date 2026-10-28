@@ -258,22 +258,27 @@ func consumeOnArrival(ctx context.Context, tx pgx.Tx, in ScanInput, woID, statio
 	return nil
 }
 
-// updateStatuses 推進卡片、製令與客戶訂單狀態；回傳製令是否剛完工。
+// updateStatuses 依進度重算卡片、製令與客戶訂單狀態；回傳製令是否完工。
+// 卡片：無剩餘＝完成；淨回報為 0（例如全部撤銷）＝未開始；其餘＝進行中。製令同理（未開始＝已開立）。
 func updateStatuses(ctx context.Context, tx pgx.Tx, cardID, woID uuid.UUID, at time.Time) (bool, error) {
 	if _, err := tx.Exec(ctx, `
 		UPDATE flow_cards SET status = CASE
 			WHEN NOT EXISTS (SELECT 1 FROM flow_card_progress WHERE card_id = $1 AND remaining_qty > 0) THEN 'DONE'
+			WHEN NOT EXISTS (SELECT 1 FROM flow_card_progress WHERE card_id = $1 AND good_qty + defect_qty > 0) THEN 'OPEN'
 			ELSE 'IN_PROGRESS' END
 		WHERE id = $1`, cardID); err != nil {
 		return false, err
 	}
 	var completed bool
 	err := tx.QueryRow(ctx, `
+		WITH p AS (
+			SELECT fp.* FROM flow_card_progress fp JOIN flow_cards c ON c.id = fp.card_id
+			WHERE c.work_order_id = $1 AND c.status NOT IN ('VOID','SPLIT'))
 		UPDATE work_orders SET
-			status = CASE WHEN NOT EXISTS (
-				SELECT 1 FROM flow_cards c JOIN flow_card_progress p ON p.card_id = c.id
-				WHERE c.work_order_id = $1 AND c.status NOT IN ('VOID','SPLIT') AND p.remaining_qty > 0)
-				THEN 'COMPLETED' ELSE 'IN_PROGRESS' END,
+			status = CASE
+				WHEN NOT EXISTS (SELECT 1 FROM p WHERE remaining_qty > 0) THEN 'COMPLETED'
+				WHEN NOT EXISTS (SELECT 1 FROM p WHERE good_qty + defect_qty > 0) THEN 'RELEASED'
+				ELSE 'IN_PROGRESS' END,
 			updated_at = $2
 		WHERE id = $1
 		RETURNING status = 'COMPLETED'`, woID, at).Scan(&completed)
@@ -284,15 +289,8 @@ func updateStatuses(ctx context.Context, tx pgx.Tx, cardID, woID uuid.UUID, at t
 		if _, err := tx.Exec(ctx, `UPDATE work_orders SET completed_at = $2 WHERE id = $1 AND completed_at IS NULL`, woID, at); err != nil {
 			return false, err
 		}
+	} else if _, err := tx.Exec(ctx, `UPDATE work_orders SET completed_at = NULL WHERE id = $1`, woID); err != nil {
+		return false, err // 撤銷後由完工退回
 	}
-	_, err = tx.Exec(ctx, `
-		UPDATE sales_orders so SET
-			status = CASE WHEN NOT EXISTS (
-				SELECT 1 FROM sales_order_lines l JOIN work_orders w ON w.sales_order_line_id = l.id
-				WHERE l.sales_order_id = so.id AND w.status NOT IN ('COMPLETED','CLOSED','CANCELLED'))
-				THEN 'COMPLETED' ELSE 'IN_PRODUCTION' END,
-			updated_at = $2
-		WHERE so.id = (SELECT l.sales_order_id FROM work_orders w JOIN sales_order_lines l ON l.id = w.sales_order_line_id WHERE w.id = $1)`,
-		woID, at)
-	return completed, err
+	return completed, refreshSalesOrder(ctx, tx, woID, at)
 }

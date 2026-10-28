@@ -36,12 +36,15 @@ type laborSession struct {
 }
 
 type stationScan struct {
-	At     time.Time `json:"at"`
-	CardNo string    `json:"cardNo"`
-	WONo   string    `json:"woNo"`
-	Good   float64   `json:"good"`
-	Defect float64   `json:"defect"`
-	User   string    `json:"user"`
+	ID         uuid.UUID  `json:"id"`
+	At         time.Time  `json:"at"`
+	CardNo     string     `json:"cardNo"`
+	WONo       string     `json:"woNo"`
+	Good       float64    `json:"good"`
+	Defect     float64    `json:"defect"`
+	User       string     `json:"user"`
+	ReversalOf *uuid.UUID `json:"reversalOf"`
+	Reversed   bool       `json:"reversed"`
 }
 
 type stationWO struct {
@@ -130,13 +133,14 @@ func (h *Handler) stationState(c *gin.Context) {
 	res["totals"] = gin.H{"good": good, "defect": defect, "scans": scans}
 
 	rows, err := pool.Query(c, `
-		SELECT ps.scanned_at, fc.card_no, w.wo_no, ps.good_qty, ps.defect_qty, u.name
+		SELECT ps.id, ps.scanned_at, fc.card_no, w.wo_no, ps.good_qty, ps.defect_qty, u.name, ps.reversal_of,
+		       EXISTS (SELECT 1 FROM production_scans r WHERE r.reversal_of = ps.id)
 		FROM production_scans ps
 		JOIN flow_cards fc ON fc.id = ps.card_id
 		JOIN work_orders w ON w.id = ps.work_order_id
 		JOIN users u ON u.id = ps.user_id
 		WHERE ps.line_id = $1 AND ps.work_date = $2 AND ps.shift_id = $3
-		ORDER BY ps.scanned_at DESC LIMIT 12`, line.ID, workDate, shiftID)
+		ORDER BY ps.scanned_at DESC, ps.created_at DESC LIMIT 12`, line.ID, workDate, shiftID)
 	if err != nil {
 		httpx.DBError(c, err)
 		return

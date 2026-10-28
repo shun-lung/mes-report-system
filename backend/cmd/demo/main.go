@@ -73,7 +73,8 @@ func main() {
 		d.start = d.start.AddDate(0, 0, -1)
 	}
 
-	d.must(d.exec(`TRUNCATE factories, users, permissions, audit_logs CASCADE`))
+	// output_hourly 沒有外鍵，不會被 CASCADE 清到，需明列
+	d.must(d.exec(`TRUNCATE factories, users, permissions, audit_logs, output_hourly CASCADE`))
 	d.must(auth.Seed(ctx, pool, cfg.AdminEmail, cfg.AdminPassword))
 	d.setupOrg()
 	d.setupAccess(cfg.AdminEmail, cfg.DemoPassword)
