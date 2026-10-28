@@ -16,6 +16,7 @@ export const router = createRouter({
         { path: 'products', component: () => import('./views/master/Products.vue'), meta: { title: '產品資料', perm: 'product:view', group: '基本資料' } },
         { path: 'stations', component: () => import('./views/master/Stations.vue'), meta: { title: '站點與線別', perm: 'station:view', group: '基本資料' } },
         { path: 'defects', component: () => import('./views/master/DefectCodes.vue'), meta: { title: '不良代碼', perm: 'station:view', group: '基本資料' } },
+        { path: 'warehouse', component: () => import('./views/Warehouse.vue'), meta: { title: '倉儲作業', perm: 'inventory:view', group: '倉儲' } },
         { path: 'inventory', component: () => import('./views/Inventory.vue'), meta: { title: '庫存與歷程', perm: 'inventory:view', group: '倉儲' } },
         { path: 'alerts', component: () => import('./views/Alerts.vue'), meta: { title: '缺料預警', perm: '', group: '倉儲' } },
         { path: 'access', component: () => import('./views/Access.vue'), meta: { title: '權限管理', perm: 'role:view', group: '系統' } },

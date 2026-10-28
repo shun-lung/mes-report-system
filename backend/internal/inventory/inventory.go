@@ -21,6 +21,7 @@ type Txn struct {
 	WorkOrderID *uuid.UUID
 	RefType     string
 	RefID       *uuid.UUID
+	ReversalOf  *uuid.UUID // 沖銷時指向被沖銷的異動
 	At          time.Time
 	WorkDate    time.Time
 	UserID      uuid.UUID
@@ -47,10 +48,10 @@ func Post(ctx context.Context, tx pgx.Tx, t Txn) (uuid.UUID, error) {
 	_, err = tx.Exec(ctx, `
 		INSERT INTO inventory_transactions
 			(id, factory_id, txn_no, txn_type, warehouse_id, product_id, qty, balance_after,
-			 work_order_id, ref_type, ref_id, occurred_at, work_date, user_id, note)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULLIF($10, ''), $11, $12, $13, $14, NULLIF($15, ''))`,
+			 work_order_id, ref_type, ref_id, reversal_of, occurred_at, work_date, user_id, note)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULLIF($10, ''), $11, $12, $13, $14, $15, NULLIF($16, ''))`,
 		id, t.FactoryID, no, t.Type, t.WarehouseID, t.ProductID, t.Qty, balance,
-		t.WorkOrderID, t.RefType, t.RefID, t.At, t.WorkDate, t.UserID, t.Note)
+		t.WorkOrderID, t.RefType, t.RefID, t.ReversalOf, t.At, t.WorkDate, t.UserID, t.Note)
 	return id, err
 }
 
