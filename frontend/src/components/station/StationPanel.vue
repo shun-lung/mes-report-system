@@ -60,6 +60,23 @@
 
       <!-- 右：掃描與回報 -->
       <main class="main">
+        <section v-if="preset?.length" class="preset">
+          <div class="preset-title">勾選的製令 — 點流程卡直接報數量，不用再掃描</div>
+          <div v-for="r in presetRows" :key="r.woNo + r.lineId" class="preset-row">
+            <div class="preset-wo">
+              <b class="num">{{ r.woNo }}</b>
+              <span v-if="r.lineCode" class="line-tag" :class="{ on: r.lineId === lineId }">{{ r.lineCode }}</span>
+            </div>
+            <div class="preset-cards">
+              <el-button v-for="p in r.cards" :key="p.cardNo" :type="card?.cardNo === p.cardNo ? 'primary' : 'default'"
+                @click="pickPreset(r.lineId, p.cardNo)">
+                <span class="num">{{ shortCard(p.cardNo) }}</span><small>&nbsp;可報 {{ fmt.int(p.remaining) }}</small>
+              </el-button>
+              <span v-if="r.note" class="muted small">{{ r.note }}</span>
+            </div>
+          </div>
+        </section>
+
         <div class="scan-box" :class="{ ready: !card }">
           <input ref="scanInput" v-model="scanText" class="scan-input" placeholder="請掃描流程卡條碼（也可輸入製令號）"
             autocomplete="off" autocapitalize="off" spellcheck="false" @keydown.enter.prevent="onEnter" />
@@ -168,6 +185,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
+import type { PresetWO } from './types'
 import { ElMessageBox } from 'element-plus'
 import { api, fmt } from '../../api'
 import { useSession } from '../../stores/session'
@@ -193,7 +211,7 @@ const canScan = computed(() => session.can('scan:report'))
 const storeKey = computed(() => `mes.station.line.${session.factoryId}`)
 interface StationLine { id: string; code: string; name: string; stationName: string; authorized: boolean }
 // embedded：嵌在系統對話框中（不顯示返回鍵與標題）
-defineProps<{ embedded?: boolean }>()
+const props = defineProps<{ embedded?: boolean; preset?: PresetWO[] }>()
 const lines = ref<StationLine[]>([])
 const restricted = ref(false)
 const allDefects = ref<DefectCode[]>([])
@@ -205,6 +223,39 @@ const card = ref<Card | null>(null)
 const goodQty = ref(0)
 const defects = reactive<Record<string, { qty: number; disposition: 'REWORK' | 'SCRAP' }>>({})
 const banner = ref<{ type: 'ok' | 'err' | 'warn'; text: string } | null>(null)
+// 製令單勾選後帶入：依各製令上工中的線別列出可報的流程卡
+type PresetRow = { woNo: string; lineId: string; lineCode: string; cards: { cardNo: string; remaining: number }[]; note: string }
+const presetRows = ref<PresetRow[]>([])
+async function loadPreset() {
+  if (!props.preset?.length) return
+  const rows: PresetRow[] = []
+  for (const w of props.preset) {
+    if (!w.lines.length) {
+      rows.push({ woNo: w.woNo, lineId: '', lineCode: '', cards: [], note: '尚未上工：請先在製令單「整批上工」，或在下方選線別後掃描' })
+      continue
+    }
+    for (const l of w.lines) {
+      const row: PresetRow = { woNo: w.woNo, lineId: l.id, lineCode: l.code, cards: [], note: '' }
+      try {
+        const r = await api<any>(`/cards/${encodeURIComponent(w.woNo)}?lineId=${l.id}`)
+        row.cards = 'pick' in r ? r.pick : [{ cardNo: r.cardNo, remaining: r.remaining }]
+        if (!row.cards.length) row.note = '本站沒有可報的卡'
+      } catch (e) {
+        row.note = (e as Error).message
+      }
+      rows.push(row)
+    }
+  }
+  presetRows.value = rows
+}
+async function pickPreset(id: string, cardNo: string) {
+  if (lineId.value !== id) {
+    lineId.value = id
+    saveLine(id)
+    await loadState()
+  }
+  await lookup(cardNo)
+}
 // 掃到製令號且本站有多張卡可報時，列出讓現場挑選
 const picks = ref<{ woNo: string; pick: { cardNo: string; qty: number; remaining: number }[] } | null>(null)
 const busy = ref(false)
@@ -384,7 +435,7 @@ async function confirm() {
     if (res.woCompleted) text += ` · 製令 ${card.value.woNo} 完工！`
     show('ok', text)
     clearCard()
-    await loadState()
+    await Promise.all([loadState(), loadPreset()])
   } catch (e) {
     show('err', (e as Error).message)
   } finally {
@@ -495,7 +546,13 @@ onMounted(async () => {
     lineId.value = lines.value[0].id
     saveLine(lineId.value)
   }
-  await loadState()
+  // 有帶入製令時，預設切到第一張製令上工中的線
+  const first = props.preset?.find((w) => w.lines.length)?.lines[0]
+  if (first) {
+    lineId.value = first.id
+    saveLine(first.id)
+  }
+  await Promise.all([loadState(), loadPreset()])
   focusScan()
   refreshTimer = window.setInterval(() => !busy.value && loadState(), 30_000)
   document.addEventListener('click', refocus)
@@ -544,6 +601,15 @@ onUnmounted(() => {
   flex: 1; min-width: 0; font-size: 24px; padding: 14px 18px; border-radius: 12px; border: 2px solid var(--border);
   background: var(--surface-1); color: var(--text-primary); font-variant-numeric: tabular-nums;
 }
+.preset { margin-bottom: 12px; padding: 12px 14px; border: 1px solid var(--series-1); border-radius: 10px; background: var(--series-1-soft); }
+.preset-title { font-weight: 600; margin-bottom: 8px; }
+.preset-row { display: flex; gap: 12px; align-items: center; padding: 6px 0; border-top: 1px solid var(--grid); flex-wrap: wrap; }
+.preset-row:first-of-type { border-top: 0; }
+.preset-wo { min-width: 230px; display: flex; gap: 8px; align-items: center; }
+.preset-cards { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; flex: 1; }
+.preset-cards .el-button { margin-left: 0; }
+.line-tag { font-size: 12px; padding: 1px 8px; border-radius: 4px; background: var(--surface-2); border: 1px solid var(--border); }
+.line-tag.on { background: var(--series-1); color: #fff; border-color: var(--series-1); }
 .picks { margin-top: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); }
 .picks-title { font-weight: 600; margin-bottom: 10px; }
 .picks-list { display: flex; flex-wrap: wrap; gap: 8px; }

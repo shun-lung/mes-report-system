@@ -64,15 +64,18 @@
             </div>
             <div class="tools">
               <template v-if="canLabor">
-                <el-button :disabled="!selectedWO.length" type="success" @click="openBatchLabor">整批上工（{{ selectedWO.length }}）</el-button>
-                <el-button :disabled="!selectedRunning.length" @click="batchEnd">整批下工（{{ selectedRunning.length }}）</el-button>
+                <el-button :disabled="!selectedWO.length" type="success" @click="openBatchLabor">① 整批上工（{{ selectedWO.length }}）</el-button>
               </template>
+              <el-button v-if="canScan" type="primary" plain @click="openScan">
+                {{ selectedWO.length ? `② 現場報數（${selectedWO.length}）` : '現場掃描' }}
+              </el-button>
+              <el-button v-if="canLabor" :disabled="!selectedRunning.length" @click="batchEnd">③ 整批下工（{{ selectedRunning.length }}）</el-button>
               <el-button v-if="canEdit" type="primary" @click="openWO(null)">新增製令</el-button>
             </div>
           </div>
           <el-table ref="woTable" :data="shownWOs" size="small" empty-text="沒有符合的製令" row-key="id"
             @selection-change="(rows: WorkOrder[]) => (selectedWO = rows)">
-            <el-table-column v-if="canLabor" type="selection" width="36" reserve-selection :selectable="laborable" />
+            <el-table-column v-if="canLabor || canScan" type="selection" width="36" reserve-selection :selectable="laborable" />
             <el-table-column label="製令" min-width="180">
               <template #default="{ row }">
                 <b>{{ row.woNo }}</b>
@@ -154,6 +157,7 @@
       </el-tabs>
     </div>
 
+    <ScanDialog v-model="scanDlg.open" :preset="scanDlg.preset" @closed="load" />
     <el-dialog v-model="laborDlg.open" title="整批上工" width="min(760px, 96vw)">
       <el-form inline @submit.prevent>
         <el-form-item label="上工站點">
@@ -261,6 +265,8 @@ import { useSession } from '../stores/session'
 import { statusText, type WorkOrder } from '../components/dashboard/types'
 import SalesOrderDialog from '../components/orders/SalesOrderDialog.vue'
 import CardsDialog from '../components/orders/CardsDialog.vue'
+import ScanDialog from '../components/station/ScanDialog.vue'
+import type { PresetWO } from '../components/station/types'
 import type { Customer, ProductLite, SalesOrder } from '../components/orders/types'
 
 const session = useSession()
@@ -313,6 +319,16 @@ async function load() {
 interface OpenLabor { lineId: string; lineCode: string; stationName: string; workOrderId: string; headcount: number }
 interface LaborStation { id: string; name: string; lines: { id: string; code: string; isActive: boolean; stdHeadcount: number }[] }
 const canLabor = computed(() => session.can('labor:report'))
+const canScan = computed(() => session.can('scan:report'))
+// 現場報數：帶入勾選的製令與其上工中的線別，在掃描對話框直接點卡報數量
+const scanDlg = reactive({ open: false, preset: [] as PresetWO[] })
+function openScan() {
+  scanDlg.preset = selectedWO.value.map((w) => ({
+    woNo: w.woNo,
+    lines: laborOf(w.id).map((l) => ({ id: l.lineId, code: l.lineCode })),
+  }))
+  scanDlg.open = true
+}
 const openLabor = ref<OpenLabor[]>([])
 const selectedWO = ref<WorkOrder[]>([])
 const woTable = ref()
