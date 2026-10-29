@@ -53,6 +53,9 @@ func (h *Handler) Register(scoped *gin.RouterGroup) {
 	scoped.POST("/scans/:id/reverse", auth.RequireAny("scan:report", "wo:edit"), h.reverseScan)
 	scoped.POST("/labor/start", auth.Require("labor:report"), h.startLabor)
 	scoped.POST("/labor/end", auth.Require("labor:report"), h.endLabor)
+	scoped.GET("/labor/open", auth.RequireAny("wo:view", "labor:report"), h.openLabor)
+	scoped.POST("/labor/batch-start", auth.Require("labor:report"), h.batchStartLabor)
+	scoped.POST("/labor/batch-end", auth.Require("labor:report"), h.batchEndLabor)
 
 	scoped.GET("/alerts", h.listAlerts)
 	scoped.POST("/alerts/:id/decide", auth.Require("alert:decide"), h.decide)
@@ -190,6 +193,64 @@ func (h *Handler) endLabor(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+// openLabor 目前各線別進行中的上工（製令列表顯示「上工中」與整批下工用）。
+func (h *Handler) openLabor(c *gin.Context) {
+	rows, err := h.svc.pool.Query(c, `
+		SELECT s.line_id, l.code, st.name, s.work_order_id, s.headcount, s.started_at
+		FROM line_labor_sessions s
+		JOIN production_lines l ON l.id = s.line_id
+		JOIN work_stations st ON st.id = l.station_id
+		WHERE s.factory_id = $1 AND s.ended_at IS NULL
+		ORDER BY l.code`, auth.FactoryID(c))
+	if err != nil {
+		httpx.DBError(c, err)
+		return
+	}
+	type openSession struct {
+		LineID      uuid.UUID `json:"lineId"`
+		LineCode    string    `json:"lineCode"`
+		StationName string    `json:"stationName"`
+		WorkOrderID uuid.UUID `json:"workOrderId"`
+		Headcount   int       `json:"headcount"`
+		StartedAt   time.Time `json:"startedAt"`
+	}
+	list, err := pgx.CollectRows(rows, pgx.RowToStructByPos[openSession])
+	if err != nil {
+		httpx.DBError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, list)
+}
+
+func (h *Handler) batchStartLabor(c *gin.Context) {
+	var req struct {
+		Items []LaborItem `json:"items" binding:"dive"`
+	}
+	if !httpx.Bind(c, &req) {
+		return
+	}
+	if err := h.svc.StartLaborBatch(c, auth.FactoryID(c), req.Items, auth.UserID(c), time.Now()); err != nil {
+		httpx.Fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"started": len(req.Items)})
+}
+
+func (h *Handler) batchEndLabor(c *gin.Context) {
+	var req struct {
+		WorkOrderIDs []uuid.UUID `json:"workOrderIds" binding:"required,min=1"`
+	}
+	if !httpx.Bind(c, &req) {
+		return
+	}
+	n, err := h.svc.EndLaborByWorkOrders(c, auth.FactoryID(c), req.WorkOrderIDs, auth.UserID(c), time.Now())
+	if err != nil {
+		httpx.Fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ended": n})
 }
 
 type decideRequest struct {

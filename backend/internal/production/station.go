@@ -215,19 +215,37 @@ func (h *Handler) cardInfo(c *gin.Context) {
 		Steps    []cardStep `json:"steps"`
 	}
 	var cardID uuid.UUID
-	err := h.svc.pool.QueryRow(c, `
+	load := func(no string) error {
+		return h.svc.pool.QueryRow(c, `
 		SELECT fc.id, fc.card_no, fc.qty, fc.status, w.id, w.wo_no, w.status, p.item_no, p.name, p.unit,
 		       (SELECT i.id FROM product_images i WHERE i.product_id = p.id ORDER BY i.is_primary DESC, i.sort_order LIMIT 1),
 		       (SELECT pc.card_no FROM flow_cards pc WHERE pc.id = fc.parent_card_id), w.require_auth, w.require_labor
 		FROM flow_cards fc
 		JOIN work_orders w ON w.id = fc.work_order_id
 		JOIN products p ON p.id = w.product_id
-		WHERE fc.card_no = $1 AND fc.factory_id = $2`, cardNo, auth.FactoryID(c)).
-		Scan(&cardID, &res.CardNo, &res.CardQty, &res.Status, &res.WOID, &res.WONo, &res.WOStatus,
-			&res.ItemNo, &res.ItemName, &res.Unit, &res.ImageID, &res.ParentNo, &res.RequireAuth, &res.RequireLabor)
+		WHERE fc.card_no = $1 AND fc.factory_id = $2`, no, auth.FactoryID(c)).
+			Scan(&cardID, &res.CardNo, &res.CardQty, &res.Status, &res.WOID, &res.WONo, &res.WOStatus,
+				&res.ItemNo, &res.ItemName, &res.Unit, &res.ImageID, &res.ParentNo, &res.RequireAuth, &res.RequireLabor)
+	}
+	err := load(cardNo)
 	if err == pgx.ErrNoRows {
-		httpx.Fail(c, httpx.Biz("找不到流程卡「%s」", cardNo))
-		return
+		// 掃到的是製令號：本站只有一張可報的卡就直接帶出，多張則讓現場挑選
+		picks, isWO, perr := h.woCardsAt(c, cardNo, line.StationID)
+		switch {
+		case perr != nil:
+			httpx.DBError(c, perr)
+			return
+		case !isWO:
+			httpx.Fail(c, httpx.Biz("找不到流程卡「%s」", cardNo))
+			return
+		case len(picks) == 0:
+			httpx.Fail(c, httpx.Biz("製令 %s 在「%s」沒有可回報的流程卡（上站尚未完成或本站已報完）", cardNo, line.StationName))
+			return
+		case len(picks) > 1:
+			c.JSON(http.StatusOK, gin.H{"woNo": cardNo, "pick": picks})
+			return
+		}
+		err = load(picks[0].CardNo)
 	}
 	if err != nil {
 		httpx.DBError(c, err)
@@ -251,6 +269,33 @@ func (h *Handler) cardInfo(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusOK, res)
+}
+
+type cardPick struct {
+	CardNo    string  `json:"cardNo"`
+	Qty       float64 `json:"qty"`
+	Remaining float64 `json:"remaining"`
+}
+
+// woCardsAt 依製令號找出在指定站點仍有可報數量的流程卡；isWO 表示此製令號存在。
+func (h *Handler) woCardsAt(c *gin.Context, woNo string, stationID uuid.UUID) ([]cardPick, bool, error) {
+	var isWO bool
+	if err := h.svc.pool.QueryRow(c, `SELECT EXISTS (SELECT 1 FROM work_orders WHERE wo_no = $1 AND factory_id = $2)`,
+		woNo, auth.FactoryID(c)).Scan(&isWO); err != nil || !isWO {
+		return nil, false, err
+	}
+	rows, err := h.svc.pool.Query(c, `
+		SELECT fc.card_no, fc.qty, fp.remaining_qty
+		FROM flow_cards fc
+		JOIN work_orders w ON w.id = fc.work_order_id
+		JOIN flow_card_progress fp ON fp.card_id = fc.id AND fp.station_id = $3
+		WHERE w.wo_no = $1 AND w.factory_id = $2 AND fc.status IN ('OPEN','IN_PROGRESS') AND fp.remaining_qty > 0
+		ORDER BY fc.card_no`, woNo, auth.FactoryID(c), stationID)
+	if err != nil {
+		return nil, true, err
+	}
+	picks, err := pgx.CollectRows(rows, pgx.RowToStructByPos[cardPick])
+	return picks, true, err
 }
 
 // userAuthorized 目前使用者是否被授權此線別（總部管理員一律視為已授權）。

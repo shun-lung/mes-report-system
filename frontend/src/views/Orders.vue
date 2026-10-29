@@ -52,13 +52,27 @@
         <!-- 製令單 -->
         <el-tab-pane label="製令單" name="wo">
           <div class="bar">
-            <el-radio-group v-model="woFilter" size="small">
-              <el-radio-button value="open">未結案</el-radio-button>
-              <el-radio-button value="all">全部</el-radio-button>
-            </el-radio-group>
-            <el-button v-if="canEdit" type="primary" @click="openWO(null)">新增製令</el-button>
+            <div class="tools">
+              <el-radio-group v-model="woFilter" size="small">
+                <el-radio-button value="open">未結案</el-radio-button>
+                <el-radio-button value="all">全部</el-radio-button>
+              </el-radio-group>
+              <el-input v-model="woSearch" size="small" clearable placeholder="搜尋製令、客戶、訂單、品項" class="search" />
+              <el-select v-model="woStation" size="small" clearable placeholder="製程站（全部）" class="station-filter">
+                <el-option v-for="n in stationNames" :key="n" :label="n" :value="n" />
+              </el-select>
+            </div>
+            <div class="tools">
+              <template v-if="canLabor">
+                <el-button :disabled="!selectedWO.length" type="success" @click="openBatchLabor">整批上工（{{ selectedWO.length }}）</el-button>
+                <el-button :disabled="!selectedRunning.length" @click="batchEnd">整批下工（{{ selectedRunning.length }}）</el-button>
+              </template>
+              <el-button v-if="canEdit" type="primary" @click="openWO(null)">新增製令</el-button>
+            </div>
           </div>
-          <el-table :data="shownWOs" size="small" empty-text="沒有製令">
+          <el-table ref="woTable" :data="shownWOs" size="small" empty-text="沒有符合的製令" row-key="id"
+            @selection-change="(rows: WorkOrder[]) => (selectedWO = rows)">
+            <el-table-column v-if="canLabor" type="selection" width="36" reserve-selection :selectable="laborable" />
             <el-table-column label="製令" min-width="180">
               <template #default="{ row }">
                 <b>{{ row.woNo }}</b>
@@ -68,6 +82,7 @@
                   <el-tag v-if="row.requireAuth" size="small" type="danger" class="ml" effect="plain">人員授權</el-tag>
                   <el-tag v-if="row.requireLabor" size="small" type="danger" class="ml" effect="plain">強制上工</el-tag>
                 </div>
+                <div v-for="l in laborOf(row.id)" :key="l.lineId" class="running small">● 上工中 {{ l.lineCode }} · {{ l.headcount }} 人</div>
               </template>
             </el-table-column>
             <el-table-column label="品項" min-width="160">
@@ -139,6 +154,39 @@
       </el-tabs>
     </div>
 
+    <el-dialog v-model="laborDlg.open" title="整批上工" width="min(760px, 96vw)">
+      <el-form inline @submit.prevent>
+        <el-form-item label="上工站點">
+          <el-select v-model="laborDlg.stationId" style="width: 160px" @change="autoAssign">
+            <el-option v-for="st in laborStations" :key="st.id" :label="st.name" :value="st.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="每線人數">
+          <el-input-number v-model="laborDlg.headcount" :min="1" :max="200" @change="(v: any) => laborDlg.rows.forEach((r) => (r.headcount = v))" />
+        </el-form-item>
+      </el-form>
+      <p class="muted small">同一條線同時只能上工一張製令；系統先把空閒的線依序分配，可自行調整。若線上已有其他製令，會先下工再換上。</p>
+      <el-table :data="laborDlg.rows" size="small">
+        <el-table-column label="製令" min-width="170">
+          <template #default="{ row }"><b>{{ row.woNo }}</b><div class="muted small">{{ row.itemNo }} {{ row.itemName }}</div></template>
+        </el-table-column>
+        <el-table-column label="線別" min-width="220">
+          <template #default="{ row }">
+            <el-select v-model="row.lineId" placeholder="選擇線別" style="width: 100%">
+              <el-option v-for="l in dlgLines" :key="l.id" :value="l.id"
+                :label="l.code + (busyLabel(l.id, row.woId) ? `（${busyLabel(l.id, row.woId)}）` : '')" />
+            </el-select>
+          </template>
+        </el-table-column>
+        <el-table-column label="人數" width="140">
+          <template #default="{ row }"><el-input-number v-model="row.headcount" :min="1" :max="200" size="small" /></template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <el-button @click="laborDlg.open = false">取消</el-button>
+        <el-button type="success" :loading="laborDlg.saving" @click="confirmBatchLabor">確認上工</el-button>
+      </template>
+    </el-dialog>
     <el-dialog v-model="convertDlg.open" title="轉製令" width="min(520px, 94vw)">
       <p>將 <b>{{ selectedSO.length }}</b> 張訂單中尚未轉製令的明細，各建立一張製令：</p>
       <ul class="so-list">
@@ -230,7 +278,17 @@ const soTag: Record<string, string> = { OPEN: 'info', IN_PRODUCTION: 'primary', 
 const woTag: Record<string, string> = { DRAFT: 'info', RELEASED: 'warning', IN_PROGRESS: 'primary', COMPLETED: 'success', CANCELLED: 'info' }
 
 const shownOrders = computed(() => orders.value.filter((o) => soFilter.value === 'all' || !['COMPLETED', 'CLOSED', 'CANCELLED'].includes(o.status)))
-const shownWOs = computed(() => workOrders.value.filter((w) => woFilter.value === 'all' || !['COMPLETED', 'CLOSED', 'CANCELLED'].includes(w.status)))
+const woSearch = ref('')
+const woStation = ref('')
+const stationNames = computed(() => [...new Set(workOrders.value.flatMap((w) => w.steps.map((s) => s.station)))])
+// 搜尋：製令、訂單、客戶、品項；製程站：途程含該站的製令
+const shownWOs = computed(() => {
+  const q = woSearch.value.trim().toLowerCase()
+  return workOrders.value.filter((w) =>
+    (woFilter.value === 'all' || !['COMPLETED', 'CLOSED', 'CANCELLED'].includes(w.status)) &&
+    (!woStation.value || w.steps.some((s) => s.station === woStation.value)) &&
+    (!q || [w.woNo, w.soNo, w.customer, w.itemNo, w.itemName, w.parentWoNo].some((v) => v?.toLowerCase().includes(q))))
+})
 const madeProducts = computed(() => products.value.filter((p) => (p.category === 'FG' || p.category === 'SFG') && p.isActive))
 
 const soDlg = reactive({ open: false, order: null as SalesOrder | null })
@@ -242,12 +300,105 @@ const selectedSO = ref<SalesOrder[]>([])
 const custDlg = reactive({ open: false, id: '', form: { code: '', name: '', isActive: true } })
 
 async function load() {
-  ;[orders.value, workOrders.value, customers.value, products.value] = await Promise.all([
+  ;[orders.value, workOrders.value, customers.value, products.value, openLabor.value] = await Promise.all([
     api<SalesOrder[]>('/sales-orders'),
     api<WorkOrder[]>('/work-orders'),
     api<Customer[]>('/customers'),
     session.can('product:view') ? api<ProductLite[]>('/products') : Promise.resolve([]),
+    api<OpenLabor[]>('/labor/open').catch(() => []),
   ])
+}
+
+// ── 整批上工／下工 ──
+interface OpenLabor { lineId: string; lineCode: string; stationName: string; workOrderId: string; headcount: number }
+interface LaborStation { id: string; name: string; lines: { id: string; code: string; isActive: boolean; stdHeadcount: number }[] }
+const canLabor = computed(() => session.can('labor:report'))
+const openLabor = ref<OpenLabor[]>([])
+const selectedWO = ref<WorkOrder[]>([])
+const woTable = ref()
+const laborable = (w: WorkOrder) => ['RELEASED', 'IN_PROGRESS'].includes(w.status)
+const laborOf = (woId: string) => openLabor.value.filter((l) => l.workOrderId === woId)
+const selectedRunning = computed(() => selectedWO.value.filter((w) => laborOf(w.id).length))
+const laborStations = ref<LaborStation[]>([])
+const laborDlg = reactive({
+  open: false, saving: false, stationId: '', headcount: 10,
+  rows: [] as { woId: string; woNo: string; itemNo: string; itemName: string; lineId: string; headcount: number }[],
+})
+const dlgLines = computed(() => laborStations.value.find((s) => s.id === laborDlg.stationId)?.lines ?? [])
+function busyLabel(lineId: string, woId: string) {
+  const l = openLabor.value.find((x) => x.lineId === lineId)
+  if (!l) return ''
+  if (l.workOrderId === woId) return '已在上工'
+  return '目前 ' + (workOrders.value.find((w) => w.id === l.workOrderId)?.woNo ?? '其他製令')
+}
+// 依序把空閒的線分配給各製令；已在此站上工的製令維持原線
+function autoAssign() {
+  const lines = dlgLines.value
+  const used = new Set<string>()
+  for (const r of laborDlg.rows) {
+    const here = openLabor.value.find((l) => l.workOrderId === r.woId && lines.some((x) => x.id === l.lineId))
+    r.lineId = here?.lineId ?? ''
+    if (here) used.add(here.lineId)
+  }
+  const free = lines.filter((l) => !used.has(l.id) && !openLabor.value.some((o) => o.lineId === l.id))
+  for (const r of laborDlg.rows) {
+    if (r.lineId) continue
+    const l = free.shift()
+    if (l) { r.lineId = l.id; used.add(l.id) }
+  }
+  const std = lines.find((l) => l.stdHeadcount)?.stdHeadcount
+  if (std) {
+    laborDlg.headcount = std
+    laborDlg.rows.forEach((r) => (r.headcount = std))
+  }
+}
+async function openBatchLabor() {
+  try {
+    if (!laborStations.value.length) {
+      laborStations.value = (await api<LaborStation[]>('/stations'))
+        .map((s) => ({ ...s, lines: s.lines.filter((l) => l.isActive) })).filter((s) => s.lines.length)
+    }
+  } catch (e) {
+    return fail(e)
+  }
+  // 預設站點：篩選中的製程站，否則選取製令共同的第一站
+  const pick = woStation.value || selectedWO.value[0]?.steps.find((s) => selectedWO.value.every((w) => w.steps.some((x) => x.station === s.station)))?.station
+  laborDlg.stationId = laborStations.value.find((s) => s.name === pick)?.id ?? laborStations.value[0]?.id ?? ''
+  laborDlg.rows = selectedWO.value.map((w) => ({ woId: w.id, woNo: w.woNo, itemNo: w.itemNo, itemName: w.itemName, lineId: '', headcount: laborDlg.headcount }))
+  autoAssign()
+  laborDlg.open = true
+}
+async function confirmBatchLabor() {
+  if (laborDlg.rows.some((r) => !r.lineId)) return ElMessage.warning('每張製令都要選線別（線別不夠時請減少勾選）')
+  const lineIds = laborDlg.rows.map((r) => r.lineId)
+  if (new Set(lineIds).size !== lineIds.length) return ElMessage.warning('同一條線只能上工一張製令，請調整線別')
+  laborDlg.saving = true
+  try {
+    await api('/labor/batch-start', {
+      method: 'POST',
+      body: { items: laborDlg.rows.map((r) => ({ lineId: r.lineId, workOrderId: r.woId, headcount: r.headcount })) },
+    })
+    ElMessage.success(`已上工 ${laborDlg.rows.length} 條線`)
+    laborDlg.open = false
+    woTable.value?.clearSelection()
+    await load()
+  } catch (e) {
+    fail(e)
+  } finally {
+    laborDlg.saving = false
+  }
+}
+async function batchEnd() {
+  const list = selectedRunning.value.flatMap((w) => laborOf(w.id).map((l) => `${l.lineCode}（${w.woNo}）`))
+  try {
+    await ElMessageBox.confirm(`下工以下線別：${list.join('、')}？`, '整批下工', { confirmButtonText: '確認下工', cancelButtonText: '返回', type: 'warning' })
+    const r = await api<{ ended: number }>('/labor/batch-end', { method: 'POST', body: { workOrderIds: selectedRunning.value.map((w) => w.id) } })
+    ElMessage.success(`已下工 ${r.ended} 條線`)
+    woTable.value?.clearSelection()
+    await load()
+  } catch (e) {
+    fail(e)
+  }
 }
 function fail(e: unknown) {
   if (e !== 'cancel' && e !== 'close') ElMessage.error((e as Error).message)
@@ -457,5 +608,8 @@ onMounted(load)
 .s-done { background: color-mix(in srgb, var(--status-good) 16%, transparent); color: var(--status-good); border-color: var(--status-good); }
 .legend { font-weight: 400; font-size: 11px; color: var(--text-muted); margin-left: 8px; }
 .dot { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin: 0 2px 0 6px; border-width: 1px; border-style: solid; vertical-align: -1px; }
+.search { width: 220px; }
+.station-filter { width: 150px; }
+.running { color: var(--status-good); margin-top: 2px; }
 .opt-r { float: right; color: var(--text-muted); font-size: 12px; margin-left: 12px; }
 </style>

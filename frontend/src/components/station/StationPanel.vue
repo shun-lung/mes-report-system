@@ -61,12 +61,22 @@
       <!-- 右：掃描與回報 -->
       <main class="main">
         <div class="scan-box" :class="{ ready: !card }">
-          <input ref="scanInput" v-model="scanText" class="scan-input" placeholder="請掃描流程卡條碼"
+          <input ref="scanInput" v-model="scanText" class="scan-input" placeholder="請掃描流程卡條碼（也可輸入製令號）"
             autocomplete="off" autocapitalize="off" spellcheck="false" @keydown.enter.prevent="onEnter" />
           <el-button size="large" :disabled="!scanText.trim()" @click="lookup(scanText)">查詢</el-button>
         </div>
 
         <div v-if="banner" class="banner" :class="banner.type" role="status">{{ banner.text }}</div>
+
+        <section v-if="picks" class="picks">
+          <div class="picks-title">製令 {{ picks.woNo }} 在本站有 {{ picks.pick.length }} 張流程卡可報，請選擇：</div>
+          <div class="picks-list">
+            <el-button v-for="p in picks.pick" :key="p.cardNo" size="large" @click="lookup(p.cardNo)">
+              <span class="num">{{ p.cardNo.slice(picks.woNo.length + 1) || p.cardNo }}</span>
+              <small class="muted">&nbsp;可報 {{ p.remaining }}／{{ p.qty }}</small>
+            </el-button>
+          </div>
+        </section>
 
         <section v-if="card" class="card-panel">
           <div class="card-head">
@@ -195,6 +205,8 @@ const card = ref<Card | null>(null)
 const goodQty = ref(0)
 const defects = reactive<Record<string, { qty: number; disposition: 'REWORK' | 'SCRAP' }>>({})
 const banner = ref<{ type: 'ok' | 'err' | 'warn'; text: string } | null>(null)
+// 掃到製令號且本站有多張卡可報時，列出讓現場挑選
+const picks = ref<{ woNo: string; pick: { cardNo: string; qty: number; remaining: number }[] } | null>(null)
 const busy = ref(false)
 const labor = reactive({ open: false, title: '', reason: '', woId: '', headcount: 1, skippable: false })
 let refreshTimer: number | undefined
@@ -288,7 +300,13 @@ async function lookup(raw: string) {
   if (!cardNo) return
   clearCard()
   try {
-    const c = await api<Card>(`/cards/${encodeURIComponent(cardNo)}?lineId=${lineId.value}`)
+    const res = await api<Card | NonNullable<typeof picks.value>>(`/cards/${encodeURIComponent(cardNo)}?lineId=${lineId.value}`)
+    if ('pick' in res) {
+      picks.value = res
+      banner.value = null
+      return
+    }
+    const c = res
     if (c.status === 'VOID') {
       show('err', `流程卡 ${c.cardNo} 已作廢（已合併回原卡）`)
       return focusScan()
@@ -337,6 +355,7 @@ function removeDefect(id: string) {
   if (d.qty <= 0) delete defects[id]
 }
 function clearCard() {
+  picks.value = null
   card.value = null
   goodQty.value = 0
   for (const k of Object.keys(defects)) delete defects[k]
@@ -525,6 +544,10 @@ onUnmounted(() => {
   flex: 1; min-width: 0; font-size: 24px; padding: 14px 18px; border-radius: 12px; border: 2px solid var(--border);
   background: var(--surface-1); color: var(--text-primary); font-variant-numeric: tabular-nums;
 }
+.picks { margin-top: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); }
+.picks-title { font-weight: 600; margin-bottom: 10px; }
+.picks-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.picks-list .el-button { margin-left: 0; }
 .scan-input:focus { outline: none; border-color: var(--series-1); box-shadow: 0 0 0 4px var(--series-1-soft); }
 .banner { padding: 14px 18px; border-radius: 10px; font-size: 18px; font-weight: 500; }
 .banner.ok { background: color-mix(in srgb, var(--status-good) 14%, var(--surface-1)); border: 1px solid var(--status-good); }
