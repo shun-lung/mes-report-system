@@ -80,6 +80,7 @@
                   <el-tag v-if="row.source === 'SHORTAGE'" size="small" type="warning" class="ml">缺料衍生</el-tag>
                   <el-tag v-if="row.requireAuth" size="small" type="danger" class="ml" effect="plain">人員授權</el-tag>
                   <el-tag v-if="row.requireLabor" size="small" type="danger" class="ml" effect="plain">強制上工</el-tag>
+                  <el-tag v-if="row.requireIssue" size="small" type="danger" class="ml" effect="plain">強制發料</el-tag>
                 </div>
                 <div v-for="l in laborOf(row.id)" :key="l.lineId" class="running small">● 上工中 {{ l.lineCode }} · {{ l.headcount }} 人</div>
               </template>
@@ -165,6 +166,7 @@
           <div class="ctl-opts">
             <el-checkbox v-model="convertDlg.requireAuth">人員授權<span class="muted small">：只有被授權該線別的人能回報</span></el-checkbox>
             <el-checkbox v-model="convertDlg.requireLabor">強制上工<span class="muted small">：須先上工此製令才能回報</span></el-checkbox>
+            <el-checkbox v-model="convertDlg.requireIssue">強制發料<span class="muted small">：該站用料須由倉管發完，才能上工與回報</span></el-checkbox>
             <span class="muted small">都不勾＝不管制（預設）</span>
           </div>
         </el-form-item>
@@ -199,6 +201,7 @@
         <el-form-item label="生管管制">
           <el-checkbox v-model="woDlg.form.requireAuth">人員授權</el-checkbox>
           <el-checkbox v-model="woDlg.form.requireLabor">強制上工</el-checkbox>
+          <el-checkbox v-model="woDlg.form.requireIssue">強制發料</el-checkbox>
         </el-form-item>
         <p v-if="!woDlg.id" class="muted small">建立後為草稿，按「開立」才會產生流程卡並檢查用料。</p>
       </el-form>
@@ -265,7 +268,7 @@ const madeProducts = computed(() => products.value.filter((p) => (p.category ===
 const soDlg = reactive({ open: false, order: null as SalesOrder | null })
 const woDlg = reactive({
   open: false, id: '', woNo: '',
-  form: { productId: '', qty: 100, dueDate: '' as string | null, requireAuth: false, requireLabor: false },
+  form: { productId: '', qty: 100, dueDate: '' as string | null, requireAuth: false, requireLabor: false, requireIssue: false },
 })
 const selectedSO = ref<SalesOrder[]>([])
 const custDlg = reactive({ open: false, id: '', form: { code: '', name: '', isActive: true } })
@@ -311,18 +314,18 @@ async function cancelSO(o: SalesOrder) {
 }
 
 // 批量轉製令：勾選的訂單一起轉，套用同一組管制選項；可選擇轉完立即開立
-const convertDlg = reactive({ open: false, requireAuth: false, requireLabor: false, release: true })
+const convertDlg = reactive({ open: false, requireAuth: false, requireLabor: false, requireIssue: false, release: true })
 const convertible = (o: SalesOrder) => o.status !== 'CANCELLED' && o.lines.some((l) => !l.woNo)
 function openConvert() {
   if (!selectedSO.value.length) return ElMessage.info('請先勾選要轉製令的訂單')
-  Object.assign(convertDlg, { open: true, requireAuth: false, requireLabor: false, release: session.can('wo:release') })
+  Object.assign(convertDlg, { open: true, requireAuth: false, requireLabor: false, requireIssue: false, release: session.can('wo:release') })
 }
 async function convert() {
   busy.value = true
   try {
     const created = await api<{ id: string; woNo: string }[]>('/sales-orders/convert', {
       method: 'POST',
-      body: { salesOrderIds: selectedSO.value.map((o) => o.id), requireAuth: convertDlg.requireAuth, requireLabor: convertDlg.requireLabor },
+      body: { salesOrderIds: selectedSO.value.map((o) => o.id), requireAuth: convertDlg.requireAuth, requireLabor: convertDlg.requireLabor, requireIssue: convertDlg.requireIssue },
     })
     convertDlg.open = false
     if (convertDlg.release) await release(created)
@@ -366,8 +369,8 @@ function openWO(w: WorkOrder | null) {
   woDlg.woNo = w?.woNo ?? ''
   const p = w && products.value.find((x) => x.itemNo === w.itemNo)
   woDlg.form = w
-    ? { productId: p?.id ?? '', qty: w.plannedQty, dueDate: w.dueDate?.slice(0, 10) ?? null, requireAuth: w.requireAuth, requireLabor: w.requireLabor }
-    : { productId: '', qty: 100, dueDate: null, requireAuth: false, requireLabor: false }
+    ? { productId: p?.id ?? '', qty: w.plannedQty, dueDate: w.dueDate?.slice(0, 10) ?? null, requireAuth: w.requireAuth, requireLabor: w.requireLabor, requireIssue: w.requireIssue }
+    : { productId: '', qty: 100, dueDate: null, requireAuth: false, requireLabor: false, requireIssue: false }
   woDlg.open = true
 }
 async function saveWO() {

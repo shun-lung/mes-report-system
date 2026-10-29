@@ -26,6 +26,9 @@ func (s *Service) StartLabor(ctx context.Context, factoryID, lineID, woID uuid.U
 		if headcount <= 0 {
 			return httpx.Biz("人數必須大於 0")
 		}
+		if err := checkLaborIssued(ctx, tx, woID, lineID); err != nil {
+			return err
+		}
 		if err := endLabor(ctx, tx, factoryID, lineID, userID, at); err != nil {
 			return err
 		}
@@ -56,6 +59,22 @@ func endLabor(ctx context.Context, tx pgx.Tx, factoryID, lineID, userID uuid.UUI
 		WHERE factory_id = $1 AND line_id = $2 AND ended_at IS NULL AND started_at < $4`,
 		factoryID, lineID, userID, at)
 	return err
+}
+
+// checkLaborIssued 製令為「強制發料」時，線別所屬站點的倉庫發料料件須已發完才能上工。
+func checkLaborIssued(ctx context.Context, tx pgx.Tx, woID, lineID uuid.UUID) error {
+	var required bool
+	var woNo, station string
+	var stationID uuid.UUID
+	if err := tx.QueryRow(ctx, `
+		SELECT w.require_issue, w.wo_no, s.id, s.name FROM work_orders w, production_lines l JOIN work_stations s ON s.id = l.station_id
+		WHERE w.id = $1 AND l.id = $2`, woID, lineID).Scan(&required, &woNo, &stationID, &station); err != nil {
+		return err
+	}
+	if !required {
+		return nil
+	}
+	return checkIssued(ctx, tx, woID, woNo, stationID, station)
 }
 
 type LaborItem struct {
@@ -96,6 +115,9 @@ func (s *Service) StartLaborBatch(ctx context.Context, factoryID uuid.UUID, item
 			}
 			if it.Headcount <= 0 {
 				return httpx.Biz("%s 的人數必須大於 0", lineCode)
+			}
+			if err := checkLaborIssued(ctx, tx, it.WorkOrderID, it.LineID); err != nil {
+				return err
 			}
 			if err := endLabor(ctx, tx, factoryID, it.LineID, userID, at); err != nil {
 				return err

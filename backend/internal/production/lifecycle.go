@@ -49,8 +49,8 @@ func (s *Service) UpdateDraft(ctx context.Context, factoryID, woID uuid.UUID, qt
 			return httpx.Biz("只有草稿製令可以修改")
 		}
 		if _, err := tx.Exec(ctx, `
-			UPDATE work_orders SET planned_qty = $2, due_date = $3, require_auth = $4, require_labor = $5, updated_at = $6 WHERE id = $1`,
-			woID, qty, due, ctl.RequireAuth, ctl.RequireLabor, at); err != nil {
+			UPDATE work_orders SET planned_qty = $2, due_date = $3, require_auth = $4, require_labor = $5, require_issue = $7, updated_at = $6 WHERE id = $1`,
+			woID, qty, due, ctl.RequireAuth, ctl.RequireLabor, at, ctl.RequireIssue); err != nil {
 			return err
 		}
 		_, err := tx.Exec(ctx, `UPDATE work_order_materials SET required_qty = round(required_qty * $2 / $3, 4) WHERE work_order_id = $1`,

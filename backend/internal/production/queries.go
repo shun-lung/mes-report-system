@@ -66,7 +66,7 @@ const WorkOrderSelect = `
 	                            FROM flow_card_progress fp JOIN flow_cards c ON c.id = fp.card_id
 	                            WHERE c.work_order_id = w.id GROUP BY fp.step_seq) agg ON agg.step_seq = rs.seq
 	                 WHERE rs.routing_id = w.routing_id), '[]'),
-	       w.require_auth, w.require_labor,
+	       w.require_auth, w.require_labor, w.require_issue,
 	       (SELECT json_build_object(
 	                 'items', count(*) FILTER (WHERE m.deduct_timing = 'ON_ISSUE'),
 	                 'done', count(*) FILTER (WHERE m.deduct_timing = 'ON_ISSUE' AND m.issued_qty >= m.required_qty),

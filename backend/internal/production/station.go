@@ -219,13 +219,13 @@ func (h *Handler) cardInfo(c *gin.Context) {
 		return h.svc.pool.QueryRow(c, `
 		SELECT fc.id, fc.card_no, fc.qty, fc.status, w.id, w.wo_no, w.status, p.item_no, p.name, p.unit,
 		       (SELECT i.id FROM product_images i WHERE i.product_id = p.id ORDER BY i.is_primary DESC, i.sort_order LIMIT 1),
-		       (SELECT pc.card_no FROM flow_cards pc WHERE pc.id = fc.parent_card_id), w.require_auth, w.require_labor
+		       (SELECT pc.card_no FROM flow_cards pc WHERE pc.id = fc.parent_card_id), w.require_auth, w.require_labor, w.require_issue
 		FROM flow_cards fc
 		JOIN work_orders w ON w.id = fc.work_order_id
 		JOIN products p ON p.id = w.product_id
 		WHERE fc.card_no = $1 AND fc.factory_id = $2`, no, auth.FactoryID(c)).
 			Scan(&cardID, &res.CardNo, &res.CardQty, &res.Status, &res.WOID, &res.WONo, &res.WOStatus,
-				&res.ItemNo, &res.ItemName, &res.Unit, &res.ImageID, &res.ParentNo, &res.RequireAuth, &res.RequireLabor)
+				&res.ItemNo, &res.ItemName, &res.Unit, &res.ImageID, &res.ParentNo, &res.RequireAuth, &res.RequireLabor, &res.RequireIssue)
 	}
 	err := load(cardNo)
 	if err == pgx.ErrNoRows {

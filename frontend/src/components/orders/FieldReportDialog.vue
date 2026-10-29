@@ -18,6 +18,7 @@
         <template #default="{ row }">
           <b>{{ row.wo.woNo }}</b>
           <el-tag v-if="row.wo.requireLabor" size="small" type="danger" effect="plain" class="ml">強制上工</el-tag>
+          <el-tag v-if="row.wo.requireIssue" size="small" type="danger" effect="plain" class="ml">強制發料</el-tag>
           <div class="muted small">{{ row.wo.itemNo }} {{ row.wo.itemName }}</div>
         </template>
       </el-table-column>

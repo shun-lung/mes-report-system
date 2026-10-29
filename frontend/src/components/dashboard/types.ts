@@ -18,7 +18,7 @@ export interface WorkOrder {
   plannedQty: number; finishedQty: number; cards: number; dueDate: string | null
   soNo: string | null; customer: string | null; parentWoNo: string | null
   releasedAt: string | null; completedAt: string | null; steps: StepProgress[]
-  requireAuth: boolean; requireLabor: boolean
+  requireAuth: boolean; requireLabor: boolean; requireIssue: boolean
   issue: { items: number; done: number; arrival: number }
 }
 export interface ShiftDashboard {

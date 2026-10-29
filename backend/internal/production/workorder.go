@@ -45,6 +45,7 @@ type NewWorkOrder struct {
 type Control struct {
 	RequireAuth  bool `json:"requireAuth"`  // 只有被授權該線別的人能回報
 	RequireLabor bool `json:"requireLabor"` // 須先上工本製令才能回報
+	RequireIssue bool `json:"requireIssue"` // 本站使用的倉庫發料料件須發完才能上工與回報
 }
 
 // createWorkOrder 建立 DRAFT 製令單，鎖定生效途程並複製 BOM 用料。
@@ -76,10 +77,10 @@ func createWorkOrder(ctx context.Context, tx pgx.Tx, in NewWorkOrder) (uuid.UUID
 	id := httpx.NewID()
 	_, err = tx.Exec(ctx, `
 		INSERT INTO work_orders (id, factory_id, wo_no, product_id, routing_id, planned_qty, card_qty,
-			source, parent_wo_id, sales_order_line_id, due_date, require_auth, require_labor, created_by, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $15)`,
+			source, parent_wo_id, sales_order_line_id, due_date, require_auth, require_labor, require_issue, created_by, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $16)`,
 		id, in.FactoryID, woNo, in.ProductID, routingID, in.Qty, cardQty,
-		source, in.ParentWOID, in.SalesOrderLineID, in.DueDate, in.Control.RequireAuth, in.Control.RequireLabor, in.UserID, in.At)
+		source, in.ParentWOID, in.SalesOrderLineID, in.DueDate, in.Control.RequireAuth, in.Control.RequireLabor, in.Control.RequireIssue, in.UserID, in.At)
 	if err != nil {
 		return uuid.Nil, "", err
 	}

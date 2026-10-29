@@ -54,13 +54,13 @@ func (s *Service) Scan(ctx context.Context, in ScanInput) (ScanResult, error) {
 		var woStatus, category string
 		var ctl Control
 		err := tx.QueryRow(ctx, `
-			SELECT c.id, w.id, w.wo_no, w.status, w.product_id, w.routing_id, p.category, w.require_auth, w.require_labor
+			SELECT c.id, w.id, w.wo_no, w.status, w.product_id, w.routing_id, p.category, w.require_auth, w.require_labor, w.require_issue
 			FROM flow_cards c
 			JOIN work_orders w ON w.id = c.work_order_id
 			JOIN products p ON p.id = w.product_id
 			WHERE c.card_no = $1 AND c.factory_id = $2 AND c.status NOT IN ('VOID','SPLIT')
 			FOR UPDATE OF c`, in.CardNo, in.FactoryID).
-			Scan(&cardID, &woID, &res.WONo, &woStatus, &productID, &routingID, &category, &ctl.RequireAuth, &ctl.RequireLabor)
+			Scan(&cardID, &woID, &res.WONo, &woStatus, &productID, &routingID, &category, &ctl.RequireAuth, &ctl.RequireLabor, &ctl.RequireIssue)
 		if err == pgx.ErrNoRows {
 			return httpx.Biz("找不到流程卡 %s", in.CardNo)
 		}
@@ -83,6 +83,11 @@ func (s *Service) Scan(ctx context.Context, in ScanInput) (ScanResult, error) {
 		}
 		if err := checkControl(ctx, tx, ctl, res.WONo, in.UserID, in.LineID, woID, in.BypassAuth); err != nil {
 			return err
+		}
+		if ctl.RequireIssue {
+			if err := checkIssued(ctx, tx, woID, res.WONo, stationID, res.Station); err != nil {
+				return err
+			}
 		}
 		err = tx.QueryRow(ctx, `SELECT seq FROM routing_steps WHERE routing_id = $1 AND station_id = $2`,
 			routingID, stationID).Scan(&res.StepSeq)
@@ -238,6 +243,22 @@ func endLaborIfStationDone(ctx context.Context, tx pgx.Tx, in ScanInput, woID uu
 			  AND fp.step_seq <= $6 AND fp.remaining_qty > 0)`,
 		in.FactoryID, in.LineID, woID, in.At, in.UserID, stepSeq)
 	return tag.RowsAffected() > 0, err
+}
+
+// checkIssued 生管管制（強制發料）：本站使用（或未指定站點）的倉庫發料料件須已發完。
+func checkIssued(ctx context.Context, tx pgx.Tx, woID uuid.UUID, woNo string, stationID uuid.UUID, station string) error {
+	var missing string
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(string_agg(p.item_no || ' 未發 ' || trim_scale(m.required_qty - m.issued_qty) || ' ' || p.unit, '、' ORDER BY p.item_no), '')
+		FROM work_order_materials m JOIN products p ON p.id = m.product_id
+		WHERE m.work_order_id = $1 AND m.deduct_timing = 'ON_ISSUE' AND m.issued_qty < m.required_qty
+		  AND (m.consume_station_id IS NULL OR m.consume_station_id = $2)`, woID, stationID).Scan(&missing); err != nil {
+		return err
+	}
+	if missing != "" {
+		return httpx.Biz("製令 %s 為生管管制（強制發料）：「%s」用料尚未發完（%s），請倉管先發料", woNo, station, missing)
+	}
+	return nil
 }
 
 // checkControl 生管管制：人員授權（使用者須被授權此線別）、強制上工（此線須已上工本製令）。

@@ -84,10 +84,11 @@
             <div class="card-info">
               <div class="card-no num">{{ card.cardNo }}</div>
               <div class="item">{{ card.itemNo }} {{ card.itemName }}</div>
-              <div v-if="card.requireAuth || card.requireLabor" class="ctl">
+              <div v-if="card.requireAuth || card.requireLabor || card.requireIssue" class="ctl">
                 <el-tag size="small" type="warning">生管管制</el-tag>
                 <span v-if="card.requireAuth" class="small">人員授權{{ state?.authorized ? ' ✓' : '（你未被授權此線別）' }}</span>
                 <span v-if="card.requireLabor" class="small">強制上工{{ state?.session?.woId === card.woId ? ' ✓' : '（須先上工）' }}</span>
+                <span v-if="card.requireIssue" class="small">強制發料（本站用料須已發完）</span>
               </div>
               <div class="muted">製令 {{ card.woNo }} · 本卡 {{ fmt.int(card.cardQty) }} {{ card.unit }}<template v-if="card.parentCardNo"> · 拆自 {{ shortCard(card.parentCardNo) }}</template></div>
             </div>
@@ -150,7 +151,7 @@ interface State {
 interface Card {
   cardNo: string; cardQty: number; status: string; woId: string; woNo: string; woStatus: string; itemNo: string; itemName: string; unit: string
   imageId: string | null; onRoute: boolean; remaining: number; stepSeq: number; parentCardNo: string | null
-  requireAuth: boolean; requireLabor: boolean
+  requireAuth: boolean; requireLabor: boolean; requireIssue: boolean
   steps: { seq: number; station: string; input: number; good: number; defect: number; remaining: number; here: boolean }[]
 }
 

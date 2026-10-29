@@ -196,8 +196,8 @@ func (s *Service) DecideAlert(ctx context.Context, factoryID, alertID uuid.UUID,
 			}
 			qty := math.Ceil(short/float64(cardQty)) * float64(cardQty)
 			var ctl Control
-			if err := tx.QueryRow(ctx, `SELECT require_auth, require_labor FROM work_orders WHERE id = $1`, woID).
-				Scan(&ctl.RequireAuth, &ctl.RequireLabor); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT require_auth, require_labor, require_issue FROM work_orders WHERE id = $1`, woID).
+				Scan(&ctl.RequireAuth, &ctl.RequireLabor, &ctl.RequireIssue); err != nil {
 				return err
 			}
 			id, no, err := createWorkOrder(ctx, tx, NewWorkOrder{
