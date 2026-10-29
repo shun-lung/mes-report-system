@@ -125,7 +125,7 @@
       <div class="card">
         <h3>線別狀態</h3>
         <el-table :data="allLines" size="small" :default-sort="{ prop: 'code' }">
-          <el-table-column label="線別" prop="code" width="100" sortable />
+          <el-table-column label="線別" prop="name" width="130" sortable :sort-by="(r: any) => r.code" />
           <el-table-column label="站點" prop="stationName" width="90" />
           <el-table-column label="狀態" width="110">
             <template #default="{ row }">

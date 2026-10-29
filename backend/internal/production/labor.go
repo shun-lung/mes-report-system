@@ -97,7 +97,7 @@ func (s *Service) StartLaborBatch(ctx context.Context, factoryID uuid.UUID, item
 		for _, it := range items {
 			var lineCode, woNo, status string
 			err := tx.QueryRow(ctx, `
-				SELECT l.code, w.wo_no, w.status FROM production_lines l, work_orders w
+				SELECT l.name, w.wo_no, w.status FROM production_lines l, work_orders w
 				WHERE l.id = $1 AND l.factory_id = $3 AND l.is_active AND w.id = $2 AND w.factory_id = $3`,
 				it.LineID, it.WorkOrderID, factoryID).Scan(&lineCode, &woNo, &status)
 			if err == pgx.ErrNoRows {

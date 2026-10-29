@@ -59,7 +59,7 @@ type userRow struct {
 	IsActive     bool        `json:"isActive"`
 	Roles        []string    `json:"roles"`
 	RoleIDs      []uuid.UUID `json:"roleIds"`
-	Lines        []string    `json:"lines"` // 授權線別代碼
+	Lines        []string    `json:"lines"` // 授權線別名稱
 }
 
 func (h *Handler) listUsers(c *gin.Context) {
@@ -67,7 +67,7 @@ func (h *Handler) listUsers(c *gin.Context) {
 		SELECT u.id, u.email, u.name, u.employee_no, u.is_super_admin, u.is_active,
 		       COALESCE(array_agg(r.name ORDER BY r.code) FILTER (WHERE r.id IS NOT NULL), '{}'),
 		       COALESCE(array_agg(r.id ORDER BY r.code) FILTER (WHERE r.id IS NOT NULL), '{}'),
-		       ARRAY(SELECT l.code FROM user_line_assignments a JOIN production_lines l ON l.id = a.line_id
+		       ARRAY(SELECT l.name FROM user_line_assignments a JOIN production_lines l ON l.id = a.line_id
 		             WHERE a.user_id = u.id AND a.factory_id = $1 ORDER BY l.code)
 		FROM users u
 		LEFT JOIN user_factory_roles ufr ON ufr.user_id = u.id AND ufr.factory_id = $1

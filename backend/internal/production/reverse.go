@@ -265,7 +265,7 @@ func (h *Handler) listScans(c *gin.Context) {
 		}
 	}
 	rows, err := h.svc.pool.Query(c, `
-		SELECT ps.id, ps.scanned_at, ps.created_at, ps.work_date, sh.name, l.code, st.name, w.wo_no, fc.card_no, p.item_no,
+		SELECT ps.id, ps.scanned_at, ps.created_at, ps.work_date, sh.name, l.name, st.name, w.wo_no, fc.card_no, p.item_no,
 		       ps.good_qty, ps.defect_qty,
 		       (SELECT string_agg(dc.code || '×' || trim_scale(abs(dr.qty)) || CASE dr.disposition WHEN 'REWORK' THEN '（重工）'
 		                         WHEN 'SCRAP' THEN '（報廢）' ELSE '（允收）' END, '、' ORDER BY dc.code)

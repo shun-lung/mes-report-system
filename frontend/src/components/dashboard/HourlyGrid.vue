@@ -32,10 +32,10 @@
           <template v-if="!collapsed.has(st.id)">
             <tr v-for="l in st.lines" :key="l.id" class="line">
               <td class="name">
-                <span class="dot" :class="l.status" :title="lineStatus[l.status]" />{{ l.code }}
+                <span class="dot" :class="l.status" :title="lineStatus[l.status]" />{{ l.name }}
               </td>
               <td v-for="(c, i) in l.hourly" :key="i" :class="cellClass(c, i)"
-                @mouseenter="tipCell($event, l.code, c, i)" @mousemove="tipCell($event, l.code, c, i)" @mouseleave="hideTip">
+                @mouseenter="tipCell($event, l.name, c, i)" @mousemove="tipCell($event, l.name, c, i)" @mouseleave="hideTip">
                 <template v-if="!isFuture(i) && (c.good || c.target)">
                   <span class="glyph">{{ attainmentGlyph(att(c, i)) }}</span>{{ fmt.int(c.good) }}
                 </template>

@@ -217,7 +217,7 @@ func (h *Handler) endLabor(c *gin.Context) {
 // openLabor 目前各線別進行中的上工（製令列表顯示「上工中」與整批下工用）。
 func (h *Handler) openLabor(c *gin.Context) {
 	rows, err := h.svc.pool.Query(c, `
-		SELECT s.line_id, l.code, st.name, s.work_order_id, w.wo_no, s.headcount, s.started_at
+		SELECT s.line_id, l.code, l.name, st.name, s.work_order_id, w.wo_no, s.headcount, s.started_at
 		FROM line_labor_sessions s
 		JOIN work_orders w ON w.id = s.work_order_id
 		JOIN production_lines l ON l.id = s.line_id
@@ -231,6 +231,7 @@ func (h *Handler) openLabor(c *gin.Context) {
 	type openSession struct {
 		LineID      uuid.UUID `json:"lineId"`
 		LineCode    string    `json:"lineCode"`
+		LineName    string    `json:"lineName"`
 		StationName string    `json:"stationName"`
 		WorkOrderID uuid.UUID `json:"workOrderId"`
 		WONo        string    `json:"woNo"`

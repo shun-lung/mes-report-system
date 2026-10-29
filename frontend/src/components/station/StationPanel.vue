@@ -5,7 +5,7 @@
       <div class="title">現場掃描</div>
       <el-select v-model="lineId" placeholder="選擇本機線別" size="large" class="line-select" @change="onLineChange">
         <el-option-group v-for="g in lineGroups" :key="g.station" :label="g.station">
-          <el-option v-for="l in g.lines" :key="l.id" :label="`${l.code}　${l.name}`" :value="l.id" />
+          <el-option v-for="l in g.lines" :key="l.id" :label="l.name" :value="l.id" />
         </el-option-group>
       </el-select>
       <el-tag v-if="restricted" size="small" type="info">只列出你被授權的線別</el-tag>
@@ -21,7 +21,7 @@
       <!-- 左：線別狀況 -->
       <aside class="side">
         <section class="panel">
-          <div class="panel-title">{{ state.line.stationName }} · {{ state.line.code }}</div>
+          <div class="panel-title">{{ state.line.name }}</div>
           <template v-if="state.session">
             <div class="status on"><i />上工中</div>
             <div class="wo">{{ state.session.woNo }}</div>
@@ -311,7 +311,7 @@ async function onReported(res: ScanResult) {
   text += res.remaining > 0 ? ` · 本站還可報 ${fmt.int(res.remaining)}` : ' · 本站已報完'
   if (res.finalStep) text += ' · 已完工入庫'
   if (res.woCompleted) text += ` · 製令 ${card.value!.woNo} 完工！`
-  if (res.laborEnded) text += ` · 本站數量已達總數，${state.value?.line.code} 已自動下工`
+  if (res.laborEnded) text += ` · 本站數量已達總數，${state.value?.line.name} 已自動下工`
   show('ok', text)
   clearCard()
   await loadState()

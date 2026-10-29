@@ -25,11 +25,11 @@
       <el-table-column label="線別 · 人數" min-width="250">
         <template #default="{ row }">
           <div v-if="row.run" class="running">
-            ● {{ row.run.lineCode }} 上工中 · {{ row.run.headcount }} 人 · {{ time(row.run.startedAt) }} 起
+            ● {{ row.run.lineName }} 上工中 · {{ row.run.headcount }} 人 · {{ time(row.run.startedAt) }} 起
           </div>
           <div v-else-if="canLabor" class="assign">
             <el-select v-model="row.lineId" size="small" :placeholder="allBusy ? '線別全忙，選了會換線' : '選線別'" class="line" @change="(id: string) => onLine(row, id)">
-              <el-option v-for="l in stationLines" :key="l.id" :value="l.id" :label="l.code + (busyLabel(l.id, row) ? `（${busyLabel(l.id, row)}）` : '')" />
+              <el-option v-for="l in stationLines" :key="l.id" :value="l.id" :label="l.name + (busyLabel(l.id, row) ? `（${busyLabel(l.id, row)}）` : '')" />
             </el-select>
             <el-input-number v-model="row.headcount" :min="1" :max="200" size="small" class="head-n" />
             <span class="muted small">人</span>
@@ -62,7 +62,7 @@
     <section v-if="active" class="report">
       <div class="report-title">
         回報 <b class="num">{{ active.cardNo }}</b>
-        <span class="muted">· {{ lineCode(active.lineId) }}{{ active.row.run ? '' : '（未上工，不計工時）' }}</span>
+        <span class="muted">· {{ lineName(active.lineId) }}{{ active.row.run ? '' : '（未上工，不計工時）' }}</span>
       </div>
       <CardReport :card-no="active.cardNo" :remaining="active.remaining" :line-id="active.lineId" :defect-codes="defectCodes"
         :device-id="`ORDERS-${lineCode(active.lineId)}`" size="default" confirm-text="確認回報" @done="onReported" @error="(m) => show('error', m)"
@@ -89,8 +89,8 @@ import CardReport, { type DefectCode, type ScanResult } from '../station/CardRep
 const props = defineProps<{ modelValue: boolean; workOrders: WorkOrder[]; station?: string }>()
 const emit = defineEmits<{ 'update:modelValue': [boolean]; closed: [] }>()
 
-interface StationLine { id: string; code: string; stationId: string; stationName: string; stdHeadcount: number }
-interface OpenLabor { lineId: string; lineCode: string; workOrderId: string; woNo: string; headcount: number; startedAt: string }
+interface StationLine { id: string; code: string; name: string; stationId: string; stationName: string; stdHeadcount: number }
+interface OpenLabor { lineId: string; lineCode: string; lineName: string; workOrderId: string; woNo: string; headcount: number; startedAt: string }
 interface StationCard { workOrderId: string; cardNo: string; qty: number; remaining: number }
 interface Row { wo: WorkOrder; lineId: string; headcount: number; run: OpenLabor | null }
 
@@ -123,6 +123,7 @@ const cardsOf = (woId: string) => cards.value.filter((c) => c.workOrderId === wo
 const sumOf = (woId: string) => cardsOf(woId).reduce((a, c) => a + c.remaining, 0)
 const allBusy = computed(() => stationLines.value.every((l) => busyLabel(l.id)))
 const lineCode = (id: string) => lines.value.find((l) => l.id === id)?.code ?? ''
+const lineName = (id: string) => lines.value.find((l) => l.id === id)?.name ?? ''
 const shortCard = (no: string) => no.split('-').slice(-2).join('-')
 const time = (v: string) => fmt.time(v, session.factory?.timezone ?? 'Asia/Taipei')
 const show = (type: 'success' | 'error' | 'warning', text: string) => (banner.value = { type, text })
@@ -219,7 +220,7 @@ async function startRows() {
       method: 'POST',
       body: { items: list.map((r) => ({ lineId: r.lineId, workOrderId: r.wo.id, headcount: r.headcount })) },
     })
-    show('success', `已上工 ${list.length} 條線：${list.map((r) => `${lineCode(r.lineId)}（${r.wo.woNo}，${r.headcount} 人）`).join('、')}`)
+    show('success', `已上工 ${list.length} 條線：${list.map((r) => `${lineName(r.lineId)}（${r.wo.woNo}，${r.headcount} 人）`).join('、')}`)
     await refresh()
   } catch (e) {
     show('error', (e as Error).message)
@@ -230,9 +231,9 @@ async function startRows() {
 async function endRows(list: Row[]) {
   const runs = list.map((r) => r.run!).filter(Boolean)
   try {
-    await ElMessageBox.confirm(`下工 ${runs.map((r) => r.lineCode).join('、')}？`, '下工', { confirmButtonText: '確認下工', cancelButtonText: '返回', type: 'warning' })
+    await ElMessageBox.confirm(`下工 ${runs.map((r) => r.lineName).join('、')}？`, '下工', { confirmButtonText: '確認下工', cancelButtonText: '返回', type: 'warning' })
     for (const r of runs) await api('/labor/end', { method: 'POST', body: { lineId: r.lineId } })
-    show('success', `已下工 ${runs.map((r) => r.lineCode).join('、')}`)
+    show('success', `已下工 ${runs.map((r) => r.lineName).join('、')}`)
     await refresh()
   } catch (e) {
     if (e !== 'cancel' && e !== 'close') show('error', (e as Error).message)
@@ -263,7 +264,7 @@ function tail(woNo: string, res: ScanResult, line: string) {
 }
 async function onReported(res: ScanResult) {
   const a = active.value!
-  show('success', resultText(a.cardNo, res) + (res.remaining > 0 ? ` · 本卡還可報 ${fmt.int(res.remaining)}` : '') + tail(a.row.wo.woNo, res, lineCode(a.lineId)))
+  show('success', resultText(a.cardNo, res) + (res.remaining > 0 ? ` · 本卡還可報 ${fmt.int(res.remaining)}` : '') + tail(a.row.wo.woNo, res, lineName(a.lineId)))
   active.value = null
   await refresh()
 }
@@ -280,7 +281,7 @@ async function reportAll(r: Row) {
       last = { ...(await api<ScanResult>('/scans', { method: 'POST', body: { cardNo: c.cardNo, lineId, goodQty: c.remaining, defects: [], deviceId: `ORDERS-${lineCode(lineId)}` } })), rework: 0 }
       total += c.remaining
     }
-    show('success', `✓ ${r.wo.woNo} 本站 ${cardsOf(r.wo.id).length} 張卡全部報完：良品 ${fmt.int(total)}` + (last ? tail(r.wo.woNo, last, lineCode(lineId)) : ''))
+    show('success', `✓ ${r.wo.woNo} 本站 ${cardsOf(r.wo.id).length} 張卡全部報完：良品 ${fmt.int(total)}` + (last ? tail(r.wo.woNo, last, lineName(lineId)) : ''))
   } catch (e) {
     show('error', `已報良品 ${fmt.int(total)} 後中斷：${(e as Error).message}`)
   } finally {

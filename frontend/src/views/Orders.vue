@@ -82,7 +82,7 @@
                   <el-tag v-if="row.requireLabor" size="small" type="danger" class="ml" effect="plain">強制上工</el-tag>
                   <el-tag v-if="row.requireIssue" size="small" type="danger" class="ml" effect="plain">強制發料</el-tag>
                 </div>
-                <div v-for="l in laborOf(row.id)" :key="l.lineId" class="running small">● 上工中 {{ l.lineCode }} · {{ l.headcount }} 人</div>
+                <div v-for="l in laborOf(row.id)" :key="l.lineId" class="running small">● 上工中 {{ l.lineName }} · {{ l.headcount }} 人</div>
               </template>
             </el-table-column>
             <el-table-column label="品項" min-width="160">
@@ -284,7 +284,7 @@ async function load() {
 }
 
 // ── 現場報數（上工、報數量、下工同一畫面）──
-interface OpenLabor { lineId: string; lineCode: string; workOrderId: string; headcount: number }
+interface OpenLabor { lineId: string; lineCode: string; lineName: string; workOrderId: string; headcount: number }
 const canLabor = computed(() => session.can('labor:report'))
 const canScan = computed(() => session.can('scan:report'))
 const fieldDlg = ref(false)

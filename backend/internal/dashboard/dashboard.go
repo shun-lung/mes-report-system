@@ -507,7 +507,7 @@ func (h *Handler) shift(c *gin.Context) {
 	}
 
 	rows, err = h.pool.Query(c, `
-		SELECT ps.scanned_at, l.code, st.name, w.wo_no, fc.card_no, p.item_no, ps.good_qty, ps.defect_qty, u.name
+		SELECT ps.scanned_at, l.name, st.name, w.wo_no, fc.card_no, p.item_no, ps.good_qty, ps.defect_qty, u.name
 		FROM production_scans ps
 		JOIN production_lines l ON l.id = ps.line_id
 		JOIN work_stations st ON st.id = ps.station_id

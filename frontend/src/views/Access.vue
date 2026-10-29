@@ -70,7 +70,7 @@
           :indeterminate="st.lines.some((l) => lineDlg.ids.includes(l.id)) && !st.lines.every((l) => lineDlg.ids.includes(l.id))"
           @change="(v: any) => toggleStation(st, !!v)"><b>{{ st.name }}</b></el-checkbox>
         <el-checkbox-group v-model="lineDlg.ids" class="lines">
-          <el-checkbox v-for="l in st.lines" :key="l.id" :value="l.id">{{ l.code }}</el-checkbox>
+          <el-checkbox v-for="l in st.lines" :key="l.id" :value="l.id">{{ l.name }}</el-checkbox>
         </el-checkbox-group>
       </div>
       <template #footer>
@@ -165,7 +165,7 @@ const permGroups = computed(() => {
   }
   return groups
 })
-const stations = ref<{ id: string; name: string; lines: { id: string; code: string; isActive: boolean }[] }[]>([])
+const stations = ref<{ id: string; name: string; lines: { id: string; code: string; name: string; isActive: boolean }[] }[]>([])
 const lineDlg = reactive({ open: false, userId: '', name: '', ids: [] as string[] })
 const userDlg = reactive({
   open: false, id: '', self: false,

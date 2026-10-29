@@ -13,7 +13,7 @@
       </el-select>
       <el-select v-model="lineId" clearable filterable placeholder="全部線別" class="w-l" @change="load">
         <el-option-group v-for="g in stations" :key="g.id" :label="g.name">
-          <el-option v-for="l in g.lines" :key="l.id" :label="l.code" :value="l.id" />
+          <el-option v-for="l in g.lines" :key="l.id" :label="l.name" :value="l.id" />
         </el-option-group>
       </el-select>
       <el-input v-model="cardNo" clearable placeholder="流程卡號（查全部日期）" class="w-c" @keydown.enter="load" @clear="load" />
@@ -85,7 +85,7 @@ const lineId = ref('')
 const cardNo = ref('')
 const scans = ref<Scan[]>([])
 const shifts = ref<{ id: string; name: string }[]>([])
-const stations = ref<{ id: string; name: string; lines: { id: string; code: string }[] }[]>([])
+const stations = ref<{ id: string; name: string; lines: { id: string; code: string; name: string }[] }[]>([])
 
 const signed = (v: number) => fmt.int(v)
 const net = computed(() => scans.value.reduce((a, s) => ({ good: a.good + s.good, defect: a.defect + s.defect }), { good: 0, defect: 0 }))
