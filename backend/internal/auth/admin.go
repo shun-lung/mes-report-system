@@ -23,6 +23,8 @@ type roleRow struct {
 	Name        string    `json:"name"`
 	Permissions []string  `json:"permissions"`
 	UserCount   int       `json:"userCount"`
+	IsSystem    bool      `json:"isSystem"`
+	Editable    bool      `json:"editable"` // 本工廠角色才可修改；共用範本不可
 }
 
 func (h *Handler) listRoles(c *gin.Context) {
@@ -31,7 +33,8 @@ func (h *Handler) listRoles(c *gin.Context) {
 		       COALESCE((SELECT array_agg(rp.permission_code ORDER BY p.sort_order)
 		                 FROM role_permissions rp JOIN permissions p ON p.code = rp.permission_code
 		                 WHERE rp.role_id = r.id), '{}'),
-		       (SELECT count(*) FROM user_factory_roles ufr WHERE ufr.role_id = r.id AND ufr.factory_id = $1)::int
+		       (SELECT count(*) FROM user_factory_roles ufr WHERE ufr.role_id = r.id AND ufr.factory_id = $1)::int,
+		       r.is_system, r.factory_id IS NOT NULL AND NOT r.is_system
 		FROM roles r
 		WHERE r.factory_id = $1 OR r.factory_id IS NULL
 		ORDER BY r.code`, FactoryID(c))
@@ -48,20 +51,22 @@ func (h *Handler) listRoles(c *gin.Context) {
 }
 
 type userRow struct {
-	ID           uuid.UUID `json:"id"`
-	Email        string    `json:"email"`
-	Name         string    `json:"name"`
-	EmployeeNo   *string   `json:"employeeNo"`
-	IsSuperAdmin bool      `json:"isSuperAdmin"`
-	IsActive     bool      `json:"isActive"`
-	Roles        []string  `json:"roles"`
-	Lines        []string  `json:"lines"` // 授權線別代碼
+	ID           uuid.UUID   `json:"id"`
+	Email        string      `json:"email"`
+	Name         string      `json:"name"`
+	EmployeeNo   *string     `json:"employeeNo"`
+	IsSuperAdmin bool        `json:"isSuperAdmin"`
+	IsActive     bool        `json:"isActive"`
+	Roles        []string    `json:"roles"`
+	RoleIDs      []uuid.UUID `json:"roleIds"`
+	Lines        []string    `json:"lines"` // 授權線別代碼
 }
 
 func (h *Handler) listUsers(c *gin.Context) {
 	rows, err := h.store.pool.Query(c, `
 		SELECT u.id, u.email, u.name, u.employee_no, u.is_super_admin, u.is_active,
 		       COALESCE(array_agg(r.name ORDER BY r.code) FILTER (WHERE r.id IS NOT NULL), '{}'),
+		       COALESCE(array_agg(r.id ORDER BY r.code) FILTER (WHERE r.id IS NOT NULL), '{}'),
 		       ARRAY(SELECT l.code FROM user_line_assignments a JOIN production_lines l ON l.id = a.line_id
 		             WHERE a.user_id = u.id AND a.factory_id = $1 ORDER BY l.code)
 		FROM users u

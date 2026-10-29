@@ -48,6 +48,7 @@ func main() {
 	authHandler := auth.NewHandler(authStore, tokens)
 	authHandler.Register(api, secured)
 	authHandler.RegisterAdmin(scoped)
+	authHandler.RegisterManage(scoped)
 	org.NewHandler(pool).Register(secured, scoped)
 	masterdata.NewHandler(pool).Register(api, scoped)
 	importer.NewHandler(pool).Register(scoped)
