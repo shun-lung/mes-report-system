@@ -39,6 +39,14 @@ type WorkOrderRow struct {
 	CompletedAt *time.Time     `json:"completedAt"`
 	Steps       []StepProgress `json:"steps"`
 	Control
+	Issue IssueSummary `json:"issue"`
+}
+
+// IssueSummary 製令發料狀況：出庫扣帳料件需由倉庫發料；到站扣帳料件於現場掃描時自動扣，不需發料。
+type IssueSummary struct {
+	Items   int `json:"items"`   // 出庫扣帳料件數
+	Done    int `json:"done"`    // 已發足的出庫扣帳料件數
+	Arrival int `json:"arrival"` // 到站扣帳料件數
 }
 
 // WorkOrderSelect 查詢製令與各站進度，供製令列表與看板共用。
@@ -58,7 +66,12 @@ const WorkOrderSelect = `
 	                            FROM flow_card_progress fp JOIN flow_cards c ON c.id = fp.card_id
 	                            WHERE c.work_order_id = w.id GROUP BY fp.step_seq) agg ON agg.step_seq = rs.seq
 	                 WHERE rs.routing_id = w.routing_id), '[]'),
-	       w.require_auth, w.require_labor
+	       w.require_auth, w.require_labor,
+	       (SELECT json_build_object(
+	                 'items', count(*) FILTER (WHERE m.deduct_timing = 'ON_ISSUE'),
+	                 'done', count(*) FILTER (WHERE m.deduct_timing = 'ON_ISSUE' AND m.issued_qty >= m.required_qty),
+	                 'arrival', count(*) FILTER (WHERE m.deduct_timing = 'ON_ARRIVAL'))
+	        FROM work_order_materials m WHERE m.work_order_id = w.id)
 	FROM work_orders w
 	JOIN products p ON p.id = w.product_id
 	LEFT JOIN sales_order_lines sl ON sl.id = w.sales_order_line_id

@@ -81,9 +81,28 @@
               </template>
             </el-table-column>
             <el-table-column label="交期" width="96"><template #default="{ row }"><span class="num">{{ fmt.date(row.dueDate) }}</span></template></el-table-column>
-            <el-table-column label="各站（良品／投入）" min-width="190">
+            <el-table-column min-width="300">
+              <template #header>
+                全流程進度
+                <span class="legend"><i class="dot s-wait" />未到站／未開始 <i class="dot s-run" />生產中 <i class="dot s-done" />完成</span>
+              </template>
               <template #default="{ row }">
-                <div v-for="s in row.steps" :key="s.seq" class="num small">{{ s.station }}：{{ fmt.int(s.good) }}／{{ fmt.int(s.input) }}</div>
+                <div class="flow">
+                  <template v-for="(s, i) in flow(row)" :key="s.seq">
+                    <span v-if="i" class="arrow">→</span>
+                    <span class="step" :class="'s-' + s.state" :title="`${s.station}：已到 ${fmt.int(s.arrived)}，投入 ${fmt.int(s.input)}，良品 ${fmt.int(s.good)}，不良 ${fmt.int(s.defect)}`">
+                      {{ s.station }}<small class="num">{{ fmt.int(s.good) }}／{{ fmt.int(s.arrived) }}<b v-if="s.defect" class="bad">×{{ fmt.int(s.defect) }}</b></small>
+                    </span>
+                  </template>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="發料" width="120">
+              <template #default="{ row }">
+                <template v-for="st in [issueState(row)]" :key="st.text">
+                  <el-tag size="small" :type="st.type" :effect="st.type === 'danger' ? 'dark' : 'light'">{{ st.text }}</el-tag>
+                  <div v-if="st.note" class="muted small">{{ st.note }}</div>
+                </template>
               </template>
             </el-table-column>
             <el-table-column label="完工／計畫" width="110" align="right">
@@ -94,7 +113,8 @@
                 <div class="ops">
                   <el-button v-if="row.status === 'DRAFT' && session.can('wo:release')" size="small" type="primary" @click="release([row])">開立</el-button>
                   <el-button v-if="row.status === 'DRAFT' && canEdit" size="small" @click="openWO(row)">修改</el-button>
-                  <el-button v-if="['RELEASED', 'IN_PROGRESS'].includes(row.status) && session.can('inventory:edit')" size="small" @click="issue(row.id)">發料</el-button>
+                  <el-button v-if="['RELEASED', 'IN_PROGRESS'].includes(row.status) && session.can('inventory:edit') && row.issue.done < row.issue.items"
+                    size="small" type="warning" @click="issue(row.id)">發料</el-button>
                   <el-button v-if="row.cards && row.status !== 'CANCELLED'" size="small" @click="openCards(row)">流程卡</el-button>
                   <el-button v-if="['DRAFT', 'RELEASED'].includes(row.status) && canEdit" size="small" text type="danger" @click="cancelWO(row)">取消</el-button>
                 </div>
@@ -345,6 +365,33 @@ async function cancelWO(w: WorkOrder) {
     fail(e)
   }
 }
+type StepState = 'wait' | 'run' | 'done'
+// 全流程進度：第一站應到量＝計畫量，之後各站應到量＝上一站良品；
+// 處理量（良品＋不良）達應到量且前站已完成才算完成；尚未到站或尚未開始回報為灰色
+function flow(w: WorkOrder) {
+  let arrived = w.plannedQty
+  let prevDone = true
+  return w.steps.map((s) => {
+    const processed = s.good + s.defect
+    let state: StepState = processed > 0 ? 'run' : 'wait'
+    if (w.status === 'COMPLETED' || (prevDone && arrived > 0 && processed >= arrived)) state = 'done'
+    const step = { ...s, arrived, state }
+    prevDone = state === 'done'
+    arrived = s.good
+    return step
+  })
+}
+// 發料狀態：只有出庫扣帳料件需要倉庫發料；到站扣帳料件於掃描時自動扣
+function issueState(w: WorkOrder): { text: string; type: 'info' | 'danger' | 'warning' | 'success'; note?: string } {
+  const { items, done, arrival } = w.issue
+  const note = arrival ? `到站扣帳 ${arrival} 項免發` : undefined
+  if (!items) return { text: '不需發料', type: 'info', note }
+  if (w.status === 'DRAFT') return { text: `開立後發料（${items} 項）`, type: 'info', note }
+  if (w.status === 'CANCELLED') return { text: '已取消', type: 'info' }
+  if (done >= items) return { text: `已發完 ${done}/${items}`, type: 'success', note }
+  if (!done) return { text: `待發料 0/${items}`, type: 'danger', note }
+  return { text: `部分發料 ${done}/${items}`, type: 'warning', note }
+}
 async function issue(id: string) {
   try {
     type Line = { itemNo: string; unit: string; qty: number; stock?: number }
@@ -400,5 +447,15 @@ onMounted(load)
 .ctl-opts { display: flex; flex-direction: column; align-items: flex-start; }
 .ops .el-button { margin-left: 0; }
 .w-full { width: 100%; }
+.flow { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 2px; }
+.arrow { color: var(--text-muted); font-size: 12px; padding: 0 1px; }
+.step { display: inline-flex; flex-direction: column; align-items: center; padding: 2px 8px; border-radius: 6px; font-size: 12px; line-height: 1.35; border: 1px solid transparent; }
+.step small { font-size: 11px; opacity: .9; }
+.step .bad { color: var(--status-critical); font-weight: 600; margin-left: 2px; }
+.s-wait { background: var(--surface-2); color: var(--text-muted); border-color: var(--border); }
+.s-run { background: var(--series-1-soft); color: var(--series-1); border-color: var(--series-1); }
+.s-done { background: color-mix(in srgb, var(--status-good) 16%, transparent); color: var(--status-good); border-color: var(--status-good); }
+.legend { font-weight: 400; font-size: 11px; color: var(--text-muted); margin-left: 8px; }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin: 0 2px 0 6px; border-width: 1px; border-style: solid; vertical-align: -1px; }
 .opt-r { float: right; color: var(--text-muted); font-size: 12px; margin-left: 12px; }
 </style>

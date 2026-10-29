@@ -19,6 +19,7 @@ export interface WorkOrder {
   soNo: string | null; customer: string | null; parentWoNo: string | null
   releasedAt: string | null; completedAt: string | null; steps: StepProgress[]
   requireAuth: boolean; requireLabor: boolean
+  issue: { items: number; done: number; arrival: number }
 }
 export interface ShiftDashboard {
   factory: { code: string; name: string; timezone: string }
