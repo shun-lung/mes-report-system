@@ -58,16 +58,43 @@ type ConvertedWorkOrder struct {
 }
 
 // ConvertSalesOrder 將訂單中尚未轉製令的明細，各建立一張 DRAFT 製令。
-func (s *Service) ConvertSalesOrder(ctx context.Context, factoryID, soID, userID uuid.UUID, at time.Time) ([]ConvertedWorkOrder, error) {
+func (s *Service) ConvertSalesOrder(ctx context.Context, factoryID, soID uuid.UUID, ctl Control, userID uuid.UUID, at time.Time) ([]ConvertedWorkOrder, error) {
 	var list []ConvertedWorkOrder
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		var status string
-		if err := tx.QueryRow(ctx, `SELECT status FROM sales_orders WHERE id = $1 AND factory_id = $2 FOR UPDATE`,
-			soID, factoryID).Scan(&status); err != nil {
+		var err error
+		list, err = convertOne(ctx, tx, factoryID, soID, ctl, userID, at)
+		return err
+	})
+	return list, err
+}
+
+// ConvertSalesOrders 批量轉製令：多張訂單在同一交易內轉換，任一張失敗則全部還原。
+func (s *Service) ConvertSalesOrders(ctx context.Context, factoryID uuid.UUID, soIDs []uuid.UUID, ctl Control, userID uuid.UUID, at time.Time) ([]ConvertedWorkOrder, error) {
+	list := []ConvertedWorkOrder{}
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		for _, id := range soIDs {
+			got, err := convertOne(ctx, tx, factoryID, id, ctl, userID, at)
+			if err != nil {
+				return err
+			}
+			list = append(list, got...)
+		}
+		return nil
+	})
+	return list, err
+}
+
+// convertOne 將一張訂單尚未轉製令的明細各建立一張草稿製令（套用管制選項）。
+func convertOne(ctx context.Context, tx pgx.Tx, factoryID, soID uuid.UUID, ctl Control, userID uuid.UUID, at time.Time) ([]ConvertedWorkOrder, error) {
+	var list []ConvertedWorkOrder
+	err := func() error {
+		var status, soNo string
+		if err := tx.QueryRow(ctx, `SELECT status, so_no FROM sales_orders WHERE id = $1 AND factory_id = $2 FOR UPDATE`,
+			soID, factoryID).Scan(&status, &soNo); err != nil {
 			return err
 		}
 		if status == "CANCELLED" || status == "CLOSED" {
-			return httpx.Biz("訂單已%s", map[string]string{"CANCELLED": "取消", "CLOSED": "結案"}[status])
+			return httpx.Biz("訂單 %s 已%s", soNo, map[string]string{"CANCELLED": "取消", "CLOSED": "結案"}[status])
 		}
 		rows, err := tx.Query(ctx, `
 			SELECT l.id, l.product_id, l.qty, l.due_date FROM sales_order_lines l
@@ -87,12 +114,12 @@ func (s *Service) ConvertSalesOrder(ctx context.Context, factoryID, soID, userID
 			return err
 		}
 		if len(lines) == 0 {
-			return httpx.Biz("訂單明細皆已轉製令")
+			return httpx.Biz("訂單 %s 的明細皆已轉製令", soNo)
 		}
 		for _, l := range lines {
 			id, no, err := createWorkOrder(ctx, tx, NewWorkOrder{
 				FactoryID: factoryID, ProductID: l.ProductID, Qty: l.Qty, SalesOrderLineID: &l.ID,
-				DueDate: &l.Due, UserID: userID, At: at,
+				DueDate: &l.Due, Control: ctl, UserID: userID, At: at,
 			})
 			if err != nil {
 				return err
@@ -100,6 +127,6 @@ func (s *Service) ConvertSalesOrder(ctx context.Context, factoryID, soID, userID
 			list = append(list, ConvertedWorkOrder{ID: id, WONo: no})
 		}
 		return nil
-	})
+	}()
 	return list, err
 }

@@ -38,6 +38,7 @@ type WorkOrderRow struct {
 	ReleasedAt  *time.Time     `json:"releasedAt"`
 	CompletedAt *time.Time     `json:"completedAt"`
 	Steps       []StepProgress `json:"steps"`
+	Control
 }
 
 // WorkOrderSelect 查詢製令與各站進度，供製令列表與看板共用。
@@ -56,7 +57,8 @@ const WorkOrderSelect = `
 	                 LEFT JOIN (SELECT fp.step_seq, sum(fp.input_qty) input, sum(fp.good_qty) good, sum(fp.defect_qty) defect
 	                            FROM flow_card_progress fp JOIN flow_cards c ON c.id = fp.card_id
 	                            WHERE c.work_order_id = w.id GROUP BY fp.step_seq) agg ON agg.step_seq = rs.seq
-	                 WHERE rs.routing_id = w.routing_id), '[]')
+	                 WHERE rs.routing_id = w.routing_id), '[]'),
+	       w.require_auth, w.require_labor
 	FROM work_orders w
 	JOIN products p ON p.id = w.product_id
 	LEFT JOIN sales_order_lines sl ON sl.id = w.sales_order_line_id

@@ -13,7 +13,7 @@ import (
 // 製令與訂單的建立、修改、取消。
 
 // CreateWorkOrder 手動建立製令（不經客戶訂單，例如備庫存、補做），狀態為草稿。
-func (s *Service) CreateWorkOrder(ctx context.Context, factoryID, productID uuid.UUID, qty float64, due *time.Time, userID uuid.UUID, at time.Time) (uuid.UUID, string, error) {
+func (s *Service) CreateWorkOrder(ctx context.Context, factoryID, productID uuid.UUID, qty float64, due *time.Time, ctl Control, userID uuid.UUID, at time.Time) (uuid.UUID, string, error) {
 	var id uuid.UUID
 	var no string
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -29,15 +29,15 @@ func (s *Service) CreateWorkOrder(ctx context.Context, factoryID, productID uuid
 			return httpx.Biz("只有成品或半成品可以開製令")
 		}
 		id, no, err = createWorkOrder(ctx, tx, NewWorkOrder{
-			FactoryID: factoryID, ProductID: productID, Qty: qty, DueDate: due, Source: "MANUAL", UserID: userID, At: at,
+			FactoryID: factoryID, ProductID: productID, Qty: qty, DueDate: due, Source: "MANUAL", Control: ctl, UserID: userID, At: at,
 		})
 		return err
 	})
 	return id, no, err
 }
 
-// UpdateDraft 修改草稿製令的數量與交期；用料需求依數量等比例重算。
-func (s *Service) UpdateDraft(ctx context.Context, factoryID, woID uuid.UUID, qty float64, due *time.Time, at time.Time) error {
+// UpdateDraft 修改草稿製令的數量、交期與管制選項；用料需求依數量等比例重算。
+func (s *Service) UpdateDraft(ctx context.Context, factoryID, woID uuid.UUID, qty float64, due *time.Time, ctl Control, at time.Time) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var status string
 		var oldQty float64
@@ -48,8 +48,9 @@ func (s *Service) UpdateDraft(ctx context.Context, factoryID, woID uuid.UUID, qt
 		if status != "DRAFT" {
 			return httpx.Biz("只有草稿製令可以修改")
 		}
-		if _, err := tx.Exec(ctx, `UPDATE work_orders SET planned_qty = $2, due_date = $3, updated_at = $4 WHERE id = $1`,
-			woID, qty, due, at); err != nil {
+		if _, err := tx.Exec(ctx, `
+			UPDATE work_orders SET planned_qty = $2, due_date = $3, require_auth = $4, require_labor = $5, updated_at = $6 WHERE id = $1`,
+			woID, qty, due, ctl.RequireAuth, ctl.RequireLabor, at); err != nil {
 			return err
 		}
 		_, err := tx.Exec(ctx, `UPDATE work_order_materials SET required_qty = round(required_qty * $2 / $3, 4) WHERE work_order_id = $1`,

@@ -27,6 +27,8 @@ type ScanInput struct {
 	UserID    uuid.UUID
 	DeviceID  string
 	At        time.Time
+	// BypassAuth 為總部管理員，不受「人員授權」管制
+	BypassAuth bool
 }
 
 type ScanResult struct {
@@ -49,14 +51,15 @@ func (s *Service) Scan(ctx context.Context, in ScanInput) (ScanResult, error) {
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var cardID, woID, productID, routingID uuid.UUID
 		var woStatus, category string
+		var ctl Control
 		err := tx.QueryRow(ctx, `
-			SELECT c.id, w.id, w.wo_no, w.status, w.product_id, w.routing_id, p.category
+			SELECT c.id, w.id, w.wo_no, w.status, w.product_id, w.routing_id, p.category, w.require_auth, w.require_labor
 			FROM flow_cards c
 			JOIN work_orders w ON w.id = c.work_order_id
 			JOIN products p ON p.id = w.product_id
 			WHERE c.card_no = $1 AND c.factory_id = $2 AND c.status NOT IN ('VOID','SPLIT')
 			FOR UPDATE OF c`, in.CardNo, in.FactoryID).
-			Scan(&cardID, &woID, &res.WONo, &woStatus, &productID, &routingID, &category)
+			Scan(&cardID, &woID, &res.WONo, &woStatus, &productID, &routingID, &category, &ctl.RequireAuth, &ctl.RequireLabor)
 		if err == pgx.ErrNoRows {
 			return httpx.Biz("找不到流程卡 %s", in.CardNo)
 		}
@@ -75,6 +78,9 @@ func (s *Service) Scan(ctx context.Context, in ScanInput) (ScanResult, error) {
 			return httpx.Biz("線別不存在或已停用")
 		}
 		if err != nil {
+			return err
+		}
+		if err := checkControl(ctx, tx, ctl, res.WONo, in.UserID, in.LineID, woID, in.BypassAuth); err != nil {
 			return err
 		}
 		err = tx.QueryRow(ctx, `SELECT seq FROM routing_steps WHERE routing_id = $1 AND station_id = $2`,
@@ -213,6 +219,32 @@ func (s *Service) Scan(ctx context.Context, in ScanInput) (ScanResult, error) {
 		return err
 	})
 	return res, err
+}
+
+// checkControl 生管管制：人員授權（使用者須被授權此線別）、強制上工（此線須已上工本製令）。
+func checkControl(ctx context.Context, tx pgx.Tx, ctl Control, woNo string, userID, lineID, woID uuid.UUID, bypassAuth bool) error {
+	if ctl.RequireAuth && !bypassAuth {
+		var ok bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM user_line_assignments WHERE user_id = $1 AND line_id = $2)`,
+			userID, lineID).Scan(&ok); err != nil {
+			return err
+		}
+		if !ok {
+			return httpx.Biz("製令 %s 為生管管制（人員授權）：你未被授權在此線別回報，請洽管理員在「權限管理」設定授權線別", woNo)
+		}
+	}
+	if ctl.RequireLabor {
+		var ok bool
+		if err := tx.QueryRow(ctx, `
+			SELECT EXISTS (SELECT 1 FROM line_labor_sessions WHERE line_id = $1 AND work_order_id = $2 AND ended_at IS NULL)`,
+			lineID, woID).Scan(&ok); err != nil {
+			return err
+		}
+		if !ok {
+			return httpx.Biz("製令 %s 為生管管制（強制上工）：本線須先上工此製令才能回報", woNo)
+		}
+	}
+	return nil
 }
 
 func consumeOnArrival(ctx context.Context, tx pgx.Tx, in ScanInput, woID, stationID uuid.UUID, processed float64, workDate time.Time, scanID uuid.UUID) error {

@@ -25,6 +25,7 @@ func (h *Handler) Register(scoped *gin.RouterGroup) {
 	scoped.GET("/sales-orders", auth.Require("wo:view"), h.listSalesOrders)
 	scoped.POST("/sales-orders", auth.Require("wo:edit"), h.createSalesOrder)
 	scoped.POST("/sales-orders/:id/work-orders", auth.Require("wo:edit"), h.convertSalesOrder)
+	scoped.POST("/sales-orders/convert", auth.Require("wo:edit"), h.convertSalesOrders)
 	scoped.PUT("/sales-orders/:id", auth.Require("wo:edit"), h.updateSalesOrder)
 	scoped.POST("/sales-orders/:id/cancel", auth.Require("wo:edit"), h.cancelSalesOrder)
 
@@ -42,6 +43,7 @@ func (h *Handler) Register(scoped *gin.RouterGroup) {
 	scoped.POST("/work-orders/:id/cards/printed", auth.Require("wo:release"), h.markPrinted)
 
 	scoped.GET("/station/state", auth.Require("scan:report"), h.stationState)
+	scoped.GET("/station/lines", auth.Require("scan:report"), h.stationLines)
 	scoped.GET("/cards/:cardNo", auth.Require("scan:report"), h.cardInfo)
 	scoped.POST("/cards/:cardNo/split", auth.RequireAny("scan:report", "wo:edit"), h.splitCard)
 	scoped.POST("/cards/:cardNo/merge", auth.RequireAny("scan:report", "wo:edit"), h.mergeCard)
@@ -77,7 +79,30 @@ func (h *Handler) convertSalesOrder(c *gin.Context) {
 	if !ok {
 		return
 	}
-	list, err := h.svc.ConvertSalesOrder(c, auth.FactoryID(c), id, auth.UserID(c), time.Now())
+	var ctl Control
+	if c.Request.ContentLength > 0 && !httpx.Bind(c, &ctl) {
+		return
+	}
+	list, err := h.svc.ConvertSalesOrder(c, auth.FactoryID(c), id, ctl, auth.UserID(c), time.Now())
+	if err != nil {
+		httpx.Fail(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, list)
+}
+
+type convertBatchRequest struct {
+	SalesOrderIDs []uuid.UUID `json:"salesOrderIds" binding:"required,min=1"`
+	Control
+}
+
+// convertSalesOrders 批量轉製令（同一組管制選項套用到所有新製令）。
+func (h *Handler) convertSalesOrders(c *gin.Context) {
+	var req convertBatchRequest
+	if !httpx.Bind(c, &req) {
+		return
+	}
+	list, err := h.svc.ConvertSalesOrders(c, auth.FactoryID(c), req.SalesOrderIDs, req.Control, auth.UserID(c), time.Now())
 	if err != nil {
 		httpx.Fail(c, err)
 		return
@@ -127,6 +152,7 @@ func (h *Handler) scan(c *gin.Context) {
 	res, err := h.svc.Scan(c, ScanInput{
 		FactoryID: auth.FactoryID(c), CardNo: strings.TrimSpace(req.CardNo), LineID: req.LineID,
 		GoodQty: req.GoodQty, Defects: req.Defects, UserID: auth.UserID(c), DeviceID: req.DeviceID, At: time.Now(),
+		BypassAuth: auth.IsSuperAdmin(c),
 	})
 	if err != nil {
 		httpx.Fail(c, err)
@@ -267,6 +293,7 @@ type workOrderInput struct {
 	ProductID uuid.UUID `json:"productId"`
 	Qty       float64   `json:"qty" binding:"gt=0"`
 	DueDate   string    `json:"dueDate"` // YYYY-MM-DD，可空
+	Control
 }
 
 func (in workOrderInput) due() (*time.Time, error) {
@@ -290,7 +317,7 @@ func (h *Handler) createWorkOrder(c *gin.Context) {
 		httpx.Fail(c, err)
 		return
 	}
-	id, no, err := h.svc.CreateWorkOrder(c, auth.FactoryID(c), in.ProductID, in.Qty, due, auth.UserID(c), time.Now())
+	id, no, err := h.svc.CreateWorkOrder(c, auth.FactoryID(c), in.ProductID, in.Qty, due, in.Control, auth.UserID(c), time.Now())
 	if err != nil {
 		httpx.Fail(c, err)
 		return
@@ -312,7 +339,7 @@ func (h *Handler) updateWorkOrder(c *gin.Context) {
 		httpx.Fail(c, err)
 		return
 	}
-	if err := h.svc.UpdateDraft(c, auth.FactoryID(c), id, in.Qty, due, time.Now()); err != nil {
+	if err := h.svc.UpdateDraft(c, auth.FactoryID(c), id, in.Qty, due, in.Control, time.Now()); err != nil {
 		httpx.Fail(c, err)
 		return
 	}

@@ -9,7 +9,7 @@
       </el-select>
       <span v-else-if="session.factory" class="factory-name">{{ session.factory.code }} {{ session.factory.name }}</span>
       <div class="spacer" />
-      <router-link v-if="session.can('scan:report')" to="/station" class="scan-link">現場掃描</router-link>
+      <button v-if="session.can('scan:report')" type="button" class="scan-link" @click="scanOpen = true">現場掃描</button>
       <el-badge :value="pending.length" :hidden="!pending.length" class="bell">
         <el-button size="small" text @click="alertOpen = true">缺料預警</el-button>
       </el-badge>
@@ -30,6 +30,19 @@
       </main>
     </div>
 
+    <el-dialog v-model="scanOpen" :fullscreen="scanFull" width="min(1240px, 98vw)" top="2vh" destroy-on-close
+      class="scan-dialog" :show-close="false" @closed="exitFullscreen">
+      <template #header>
+        <div class="scan-head">
+          <b>現場掃描</b>
+          <span class="spacer" />
+          <el-button size="small" @click="toggleFull">{{ scanFull ? '離開全螢幕' : '全螢幕' }}</el-button>
+          <el-button size="small" @click="scanOpen = false">關閉</el-button>
+        </div>
+      </template>
+      <StationPanel embedded />
+    </el-dialog>
+
     <el-dialog v-model="alertOpen" title="缺料預警 — 請選擇「通知建單」或「Pass」" width="min(920px, 96vw)">
       <AlertList :alerts="pending" @decided="loadAlerts" />
     </el-dialog>
@@ -42,6 +55,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api'
 import { useSession } from '../stores/session'
 import AlertList, { type Alert } from './AlertList.vue'
+import StationPanel from './station/StationPanel.vue'
 
 const session = useSession()
 const route = useRoute()
@@ -49,6 +63,23 @@ const router = useRouter()
 const navOpen = ref(false)
 const alertOpen = ref(false)
 const pending = ref<Alert[]>([])
+const scanOpen = ref(false)
+const scanFull = ref(false)
+
+// 全螢幕：對話框鋪滿，並在支援的裝置（平板）切換瀏覽器全螢幕
+async function toggleFull() {
+  scanFull.value = !scanFull.value
+  try {
+    if (scanFull.value && !document.fullscreenElement) await document.documentElement.requestFullscreen()
+    else if (!scanFull.value && document.fullscreenElement) await document.exitFullscreen()
+  } catch {
+    /* 不支援全螢幕時只鋪滿對話框 */
+  }
+}
+function exitFullscreen() {
+  scanFull.value = false
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {})
+}
 
 const menu = computed(() =>
   router.options.routes
@@ -98,7 +129,11 @@ watch(() => session.factoryId, checkOnEnter)
 .factory-name { color: var(--text-secondary); }
 .spacer { flex: 1; }
 .user { color: var(--text-secondary); }
-.scan-link { padding: 5px 12px; border-radius: 6px; background: var(--series-1); color: #fff; text-decoration: none; font-size: 13px; }
+.scan-link { padding: 5px 12px; border-radius: 6px; background: var(--series-1); color: #fff; text-decoration: none; font-size: 13px; border: 0; cursor: pointer; font: inherit; }
+.scan-head { display: flex; align-items: center; gap: 8px; }
+.scan-head .spacer { flex: 1; }
+:global(.scan-dialog .el-dialog__body) { padding: 0; }
+:global(.scan-dialog .el-dialog__header) { padding-bottom: 8px; }
 .menu-btn { display: none; background: none; border: 0; font-size: 18px; color: var(--text-primary); cursor: pointer; }
 .body { flex: 1; display: flex; min-height: 0; }
 nav {

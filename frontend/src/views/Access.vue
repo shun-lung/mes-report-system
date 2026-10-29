@@ -7,14 +7,41 @@
         <el-table-column label="Email" prop="email" min-width="200" />
         <el-table-column label="姓名" prop="name" width="120" />
         <el-table-column label="工號" prop="employeeNo" width="90" />
-        <el-table-column label="角色" min-width="200">
+        <el-table-column label="角色" min-width="180">
           <template #default="{ row }">
             <el-tag v-if="row.isSuperAdmin" type="danger" size="small" class="ml">總部管理員</el-tag>
             <el-tag v-for="r in row.roles" :key="r" size="small" class="ml">{{ r }}</el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="授權線別（生管管制用）" min-width="220">
+          <template #default="{ row }">
+            <span v-if="row.isSuperAdmin" class="muted small">不受限制</span>
+            <template v-else>
+              <span v-if="!row.lines.length" class="muted small">未設定</span>
+              <span v-else class="small">{{ row.lines.join('、') }}</span>
+              <el-button v-if="canEditUsers" size="small" text @click="openLines(row)">設定</el-button>
+            </template>
+          </template>
+        </el-table-column>
       </el-table>
     </div>
+    <el-dialog v-model="lineDlg.open" :title="`授權線別：${lineDlg.name}`" width="min(560px, 94vw)">
+      <p class="muted small">製令設為「人員授權」時，只有被授權該線別的人能在那條線回報；掃描畫面也只會列出授權的線別。</p>
+      <div v-for="st in stations" :key="st.id" class="st-group">
+        <el-checkbox :model-value="st.lines.every((l) => lineDlg.ids.includes(l.id))"
+          :indeterminate="st.lines.some((l) => lineDlg.ids.includes(l.id)) && !st.lines.every((l) => lineDlg.ids.includes(l.id))"
+          @change="(v: any) => toggleStation(st, !!v)"><b>{{ st.name }}</b></el-checkbox>
+        <el-checkbox-group v-model="lineDlg.ids" class="lines">
+          <el-checkbox v-for="l in st.lines" :key="l.id" :value="l.id">{{ l.code }}</el-checkbox>
+        </el-checkbox-group>
+      </div>
+      <template #footer>
+        <el-button @click="lineDlg.ids = []">全部清除</el-button>
+        <el-button @click="lineDlg.open = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="saveLines">儲存</el-button>
+      </template>
+    </el-dialog>
+
     <div class="card">
       <h3>角色 × 權限 <small>✓ = 具備</small></h3>
       <div class="matrix-wrap">
@@ -40,7 +67,8 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { useSession } from '../stores/session'
 
@@ -51,9 +79,39 @@ const perms = ref<{ code: string; module: string; name: string }[]>([])
 const moduleName: Record<string, string> = {
   system: '系統', org: '組織', masterdata: '基本資料', production: '生產', inventory: '倉儲', report: '報表',
 }
-onMounted(async () => {
+const canEditUsers = computed(() => session.can('user:edit'))
+const stations = ref<{ id: string; name: string; lines: { id: string; code: string; isActive: boolean }[] }[]>([])
+const lineDlg = reactive({ open: false, userId: '', name: '', ids: [] as string[] })
+const saving = ref(false)
+
+async function load() {
   ;[users.value, roles.value, perms.value] = await Promise.all([api<any[]>('/users'), api<any[]>('/roles'), api<any[]>('/permissions')])
-})
+}
+async function openLines(u: any) {
+  if (!stations.value.length) {
+    stations.value = (await api<any[]>('/stations')).map((s) => ({ ...s, lines: s.lines.filter((l: any) => l.isActive) })).filter((s) => s.lines.length)
+  }
+  Object.assign(lineDlg, { open: true, userId: u.id, name: u.name, ids: await api<string[]>(`/users/${u.id}/lines`) })
+}
+function toggleStation(st: { lines: { id: string }[] }, on: boolean) {
+  const ids = new Set(lineDlg.ids)
+  for (const l of st.lines) on ? ids.add(l.id) : ids.delete(l.id)
+  lineDlg.ids = [...ids]
+}
+async function saveLines() {
+  saving.value = true
+  try {
+    await api(`/users/${lineDlg.userId}/lines`, { method: 'PUT', body: { lineIds: lineDlg.ids } })
+    ElMessage.success('已儲存授權線別')
+    lineDlg.open = false
+    await load()
+  } catch (e) {
+    ElMessage.error((e as Error).message)
+  } finally {
+    saving.value = false
+  }
+}
+onMounted(load)
 </script>
 
 <style scoped>
@@ -65,4 +123,6 @@ onMounted(async () => {
 .matrix th { font-weight: 600; }
 .left { text-align: left !important; }
 .mark { color: var(--series-1); font-weight: 700; }
+.st-group { padding: 8px 0; border-bottom: 1px solid var(--grid); }
+.lines { margin-left: 24px; display: flex; flex-wrap: wrap; }
 </style>

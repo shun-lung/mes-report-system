@@ -94,7 +94,12 @@ func (h *Handler) stationState(c *gin.Context) {
 		httpx.Fail(c, httpx.Biz("%s", err.Error()))
 		return
 	}
-	res := gin.H{"line": line, "workDate": workDate.Format(time.DateOnly)}
+	authorized, err := userAuthorized(c, h, line.ID)
+	if err != nil {
+		httpx.DBError(c, err)
+		return
+	}
+	res := gin.H{"line": line, "workDate": workDate.Format(time.DateOnly), "authorized": authorized}
 
 	var shiftName string
 	if err := pool.QueryRow(c, `SELECT name FROM shifts WHERE id = $1`, shiftID).Scan(&shiftName); err != nil {
@@ -205,20 +210,21 @@ func (h *Handler) cardInfo(c *gin.Context) {
 		OnRoute   bool       `json:"onRoute"`
 		Remaining float64    `json:"remaining"`
 		StepSeq   int        `json:"stepSeq"` // 本線所屬站點在途程中的站序
-		ParentNo  *string    `json:"parentCardNo"`
-		Steps     []cardStep `json:"steps"`
+		Control
+		ParentNo *string    `json:"parentCardNo"`
+		Steps    []cardStep `json:"steps"`
 	}
 	var cardID uuid.UUID
 	err := h.svc.pool.QueryRow(c, `
 		SELECT fc.id, fc.card_no, fc.qty, fc.status, w.id, w.wo_no, w.status, p.item_no, p.name, p.unit,
 		       (SELECT i.id FROM product_images i WHERE i.product_id = p.id ORDER BY i.is_primary DESC, i.sort_order LIMIT 1),
-		       (SELECT pc.card_no FROM flow_cards pc WHERE pc.id = fc.parent_card_id)
+		       (SELECT pc.card_no FROM flow_cards pc WHERE pc.id = fc.parent_card_id), w.require_auth, w.require_labor
 		FROM flow_cards fc
 		JOIN work_orders w ON w.id = fc.work_order_id
 		JOIN products p ON p.id = w.product_id
 		WHERE fc.card_no = $1 AND fc.factory_id = $2`, cardNo, auth.FactoryID(c)).
 		Scan(&cardID, &res.CardNo, &res.CardQty, &res.Status, &res.WOID, &res.WONo, &res.WOStatus,
-			&res.ItemNo, &res.ItemName, &res.Unit, &res.ImageID, &res.ParentNo)
+			&res.ItemNo, &res.ItemName, &res.Unit, &res.ImageID, &res.ParentNo, &res.RequireAuth, &res.RequireLabor)
 	if err == pgx.ErrNoRows {
 		httpx.Fail(c, httpx.Biz("找不到流程卡「%s」", cardNo))
 		return
@@ -245,4 +251,54 @@ func (h *Handler) cardInfo(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusOK, res)
+}
+
+// userAuthorized 目前使用者是否被授權此線別（總部管理員一律視為已授權）。
+func userAuthorized(c *gin.Context, h *Handler, lineID uuid.UUID) (bool, error) {
+	if auth.IsSuperAdmin(c) {
+		return true, nil
+	}
+	var ok bool
+	err := h.svc.pool.QueryRow(c, `SELECT EXISTS (SELECT 1 FROM user_line_assignments WHERE user_id = $1 AND line_id = $2)`,
+		auth.UserID(c), lineID).Scan(&ok)
+	return ok, err
+}
+
+type stationLineOption struct {
+	ID          uuid.UUID `json:"id"`
+	Code        string    `json:"code"`
+	Name        string    `json:"name"`
+	StationName string    `json:"stationName"`
+	Authorized  bool      `json:"authorized"`
+}
+
+// stationLines 掃描畫面可選的線別：有授權線別的人只列授權的；沒有任何授權（或總部管理員）列出全部。
+func (h *Handler) stationLines(c *gin.Context) {
+	userID, superAdmin := auth.UserID(c), auth.IsSuperAdmin(c)
+	rows, err := h.svc.pool.Query(c, `
+		SELECT l.id, l.code, l.name, s.name,
+		       $3 OR EXISTS (SELECT 1 FROM user_line_assignments a WHERE a.user_id = $2 AND a.line_id = l.id)
+		FROM production_lines l JOIN work_stations s ON s.id = l.station_id
+		WHERE l.factory_id = $1 AND l.is_active AND s.is_active
+		ORDER BY s.sort_order, l.code`, auth.FactoryID(c), userID, superAdmin)
+	if err != nil {
+		httpx.DBError(c, err)
+		return
+	}
+	all, err := pgx.CollectRows(rows, pgx.RowToStructByPos[stationLineOption])
+	if err != nil {
+		httpx.DBError(c, err)
+		return
+	}
+	var mine []stationLineOption
+	for _, l := range all {
+		if l.Authorized {
+			mine = append(mine, l)
+		}
+	}
+	if superAdmin || len(mine) == 0 {
+		c.JSON(http.StatusOK, gin.H{"lines": all, "restricted": false})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"lines": mine, "restricted": true})
 }

@@ -195,9 +195,14 @@ func (s *Service) DecideAlert(ctx context.Context, factoryID, alertID uuid.UUID,
 				return httpx.Biz("目前可用量已足夠（含在途製令與採購），不需建單，請選擇 Pass")
 			}
 			qty := math.Ceil(short/float64(cardQty)) * float64(cardQty)
+			var ctl Control
+			if err := tx.QueryRow(ctx, `SELECT require_auth, require_labor FROM work_orders WHERE id = $1`, woID).
+				Scan(&ctl.RequireAuth, &ctl.RequireLabor); err != nil {
+				return err
+			}
 			id, no, err := createWorkOrder(ctx, tx, NewWorkOrder{
 				FactoryID: factoryID, ProductID: productID, Qty: qty, DueDate: dueDate,
-				Source: "SHORTAGE", ParentWOID: &woID, UserID: userID, At: at,
+				Source: "SHORTAGE", ParentWOID: &woID, Control: ctl, UserID: userID, At: at,
 			})
 			if err != nil {
 				return err

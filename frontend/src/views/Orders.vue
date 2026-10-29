@@ -10,9 +10,15 @@
               <el-radio-button value="open">未結案</el-radio-button>
               <el-radio-button value="all">全部</el-radio-button>
             </el-radio-group>
-            <el-button v-if="canEdit" type="primary" @click="openSO(null)">新增訂單</el-button>
+            <span class="tools">
+              <el-button v-if="canEdit" type="primary" @click="openSO(null)">新增訂單</el-button>
+              <el-button v-if="canEdit" type="primary" plain :disabled="!selectedSO.length" @click="openConvert">
+                轉製令{{ selectedSO.length ? `（${selectedSO.length}）` : '' }}
+              </el-button>
+            </span>
           </div>
-          <el-table :data="shownOrders" size="small" empty-text="沒有訂單">
+          <el-table :data="shownOrders" size="small" empty-text="沒有訂單" @selection-change="(rows: SalesOrder[]) => (selectedSO = rows)">
+            <el-table-column v-if="canEdit" type="selection" width="36" :selectable="convertible" />
             <el-table-column label="訂單" min-width="180">
               <template #default="{ row }"><b>{{ row.soNo }}</b><div class="muted small">PO：{{ row.customerPo ?? '—' }}</div></template>
             </el-table-column>
@@ -35,7 +41,6 @@
             <el-table-column v-if="canEdit" label="操作" width="190">
               <template #default="{ row }">
                 <template v-if="row.status !== 'CANCELLED'">
-                  <el-button v-if="row.lines.some((l: any) => !l.woNo)" size="small" type="primary" @click="convert(row)">轉製令</el-button>
                   <el-button v-if="!row.lines.some((l: any) => l.woNo)" size="small" @click="openSO(row)">修改</el-button>
                   <el-button v-if="!row.lines.some((l: any) => l.woNo)" size="small" text type="danger" @click="cancelSO(row)">取消</el-button>
                 </template>
@@ -60,6 +65,8 @@
                 <div class="small">
                   <el-tag size="small" :type="woTag[row.status]">{{ statusText[row.status] }}</el-tag>
                   <el-tag v-if="row.source === 'SHORTAGE'" size="small" type="warning" class="ml">缺料衍生</el-tag>
+                  <el-tag v-if="row.requireAuth" size="small" type="danger" class="ml" effect="plain">人員授權</el-tag>
+                  <el-tag v-if="row.requireLabor" size="small" type="danger" class="ml" effect="plain">強制上工</el-tag>
                 </div>
               </template>
             </el-table-column>
@@ -112,6 +119,29 @@
       </el-tabs>
     </div>
 
+    <el-dialog v-model="convertDlg.open" title="轉製令" width="min(520px, 94vw)">
+      <p>將 <b>{{ selectedSO.length }}</b> 張訂單中尚未轉製令的明細，各建立一張製令：</p>
+      <ul class="so-list">
+        <li v-for="o in selectedSO" :key="o.id">{{ o.soNo }}　{{ o.customer }}（{{ o.lines.filter((l) => !l.woNo).length }} 項）</li>
+      </ul>
+      <el-form label-width="80px" @submit.prevent>
+        <el-form-item label="生管管制">
+          <div class="ctl-opts">
+            <el-checkbox v-model="convertDlg.requireAuth">人員授權<span class="muted small">：只有被授權該線別的人能回報</span></el-checkbox>
+            <el-checkbox v-model="convertDlg.requireLabor">強制上工<span class="muted small">：須先上工此製令才能回報</span></el-checkbox>
+            <span class="muted small">都不勾＝不管制（預設）</span>
+          </div>
+        </el-form-item>
+        <el-form-item v-if="session.can('wo:release')" label="開立">
+          <el-checkbox v-model="convertDlg.release">轉製令後立即開立（產生流程卡並檢查用料）</el-checkbox>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="convertDlg.open = false">取消</el-button>
+        <el-button type="primary" :loading="busy" @click="convert">確認轉製令</el-button>
+      </template>
+    </el-dialog>
+
     <CardsDialog v-model="cardsDlg.open" :wo-id="cardsDlg.id" :wo-no="cardsDlg.woNo" @changed="load" />
     <SalesOrderDialog v-model="soDlg.open" :order="soDlg.order" :customers="customers" :products="products" @saved="load" />
 
@@ -128,6 +158,10 @@
         <el-form-item label="數量" required><el-input-number v-model="woDlg.form.qty" :min="1" :step="100" /></el-form-item>
         <el-form-item label="交期">
           <el-date-picker v-model="woDlg.form.dueDate" type="date" value-format="YYYY-MM-DD" placeholder="可不填" />
+        </el-form-item>
+        <el-form-item label="生管管制">
+          <el-checkbox v-model="woDlg.form.requireAuth">人員授權</el-checkbox>
+          <el-checkbox v-model="woDlg.form.requireLabor">強制上工</el-checkbox>
         </el-form-item>
         <p v-if="!woDlg.id" class="muted small">建立後為草稿，按「開立」才會產生流程卡並檢查用料。</p>
       </el-form>
@@ -180,7 +214,11 @@ const shownWOs = computed(() => workOrders.value.filter((w) => woFilter.value ==
 const madeProducts = computed(() => products.value.filter((p) => (p.category === 'FG' || p.category === 'SFG') && p.isActive))
 
 const soDlg = reactive({ open: false, order: null as SalesOrder | null })
-const woDlg = reactive({ open: false, id: '', woNo: '', form: { productId: '', qty: 100, dueDate: '' as string | null } })
+const woDlg = reactive({
+  open: false, id: '', woNo: '',
+  form: { productId: '', qty: 100, dueDate: '' as string | null, requireAuth: false, requireLabor: false },
+})
+const selectedSO = ref<SalesOrder[]>([])
 const custDlg = reactive({ open: false, id: '', form: { code: '', name: '', isActive: true } })
 
 async function load() {
@@ -212,22 +250,30 @@ async function cancelSO(o: SalesOrder) {
   }
 }
 
-async function convert(o: SalesOrder) {
+// 批量轉製令：勾選的訂單一起轉，套用同一組管制選項；可選擇轉完立即開立
+const convertDlg = reactive({ open: false, requireAuth: false, requireLabor: false, release: true })
+const convertible = (o: SalesOrder) => o.status !== 'CANCELLED' && o.lines.some((l) => !l.woNo)
+function openConvert() {
+  if (!selectedSO.value.length) return ElMessage.info('請先勾選要轉製令的訂單')
+  Object.assign(convertDlg, { open: true, requireAuth: false, requireLabor: false, release: session.can('wo:release') })
+}
+async function convert() {
+  busy.value = true
   try {
-    const created = await api<{ id: string; woNo: string }[]>(`/sales-orders/${o.id}/work-orders`, { method: 'POST' })
-    await load()
-    const canRelease = session.can('wo:release')
-    if (!canRelease) {
-      ElMessage.success(`已建立 ${created.length} 張草稿製令，請生管開立`)
-      return
+    const created = await api<{ id: string; woNo: string }[]>('/sales-orders/convert', {
+      method: 'POST',
+      body: { salesOrderIds: selectedSO.value.map((o) => o.id), requireAuth: convertDlg.requireAuth, requireLabor: convertDlg.requireLabor },
+    })
+    convertDlg.open = false
+    if (convertDlg.release) await release(created)
+    else {
+      ElMessage.success(`已建立 ${created.length} 張草稿製令：${created.map((w) => w.woNo).join('、')}`)
+      await load()
     }
-    await ElMessageBox.confirm(
-      `已建立 ${created.length} 張草稿製令：${created.map((w) => w.woNo).join('、')}。要立即開立嗎？開立會產生流程卡並檢查用料。`,
-      '轉製令完成', { confirmButtonText: '立即開立', cancelButtonText: '稍後再開', type: 'success' },
-    )
-    await release(created.map((w) => ({ id: w.id, woNo: w.woNo })))
   } catch (e) {
     fail(e)
+  } finally {
+    busy.value = false
   }
 }
 
@@ -259,7 +305,9 @@ function openWO(w: WorkOrder | null) {
   woDlg.id = w?.id ?? ''
   woDlg.woNo = w?.woNo ?? ''
   const p = w && products.value.find((x) => x.itemNo === w.itemNo)
-  woDlg.form = w ? { productId: p?.id ?? '', qty: w.plannedQty, dueDate: w.dueDate?.slice(0, 10) ?? null } : { productId: '', qty: 100, dueDate: null }
+  woDlg.form = w
+    ? { productId: p?.id ?? '', qty: w.plannedQty, dueDate: w.dueDate?.slice(0, 10) ?? null, requireAuth: w.requireAuth, requireLabor: w.requireLabor }
+    : { productId: '', qty: 100, dueDate: null, requireAuth: false, requireLabor: false }
   woDlg.open = true
 }
 async function saveWO() {
@@ -346,6 +394,10 @@ onMounted(load)
 .so-line { display: flex; flex-wrap: wrap; gap: 4px 12px; line-height: 1.8; }
 .warn { color: var(--div-neg-ink); }
 .ops { display: flex; flex-wrap: wrap; gap: 4px; }
+.tools { display: flex; gap: 8px; }
+.tools .el-button { margin-left: 0; }
+.so-list { margin: 0 0 12px; padding-left: 20px; line-height: 1.8; }
+.ctl-opts { display: flex; flex-direction: column; align-items: flex-start; }
 .ops .el-button { margin-left: 0; }
 .w-full { width: 100%; }
 .opt-r { float: right; color: var(--text-muted); font-size: 12px; margin-left: 12px; }

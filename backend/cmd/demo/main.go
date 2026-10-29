@@ -208,7 +208,10 @@ func (d *demo) setupMasterData() {
 			d.lines = append(d.lines, &simLine{id: lid, code: l.code, station: s.code, stationID: id, capacity: l.capacity, headcount: l.hc, efficiency: 0.92})
 		}
 	}
-	step("站點 4 個（前期準備 → 針車 → 成型 → 整理），線別 12 條")
+	// 陳組長授權全部線別（生管管制「人員授權」的製令需要）
+	d.must(d.exec(`INSERT INTO user_line_assignments (user_id, factory_id, line_id)
+		SELECT $1, $2, id FROM production_lines WHERE factory_id = $2`, d.users["LEADER"], d.factory))
+	step("站點 4 個（前期準備 → 針車 → 成型 → 整理），線別 12 條；陳組長授權全部線別")
 
 	products := []struct {
 		itemNo, name, category, unit, barcode, spec, deduct string
@@ -366,7 +369,7 @@ func (d *demo) orderFlow() {
 	d.must(err)
 	step("07:10 王生管 建立客戶訂單 %s：SL-001 黑 1,200 雙、SL-002 白 800 雙，交期 %s", soNo, due)
 
-	wos, err := d.svc.ConvertSalesOrder(d.ctx, d.factory, soID, pc, d.at(-48))
+	wos, err := d.svc.ConvertSalesOrder(d.ctx, d.factory, soID, production.Control{}, pc, d.at(-48))
 	d.must(err)
 	var autoPOs []string
 	for i, wo := range wos {
