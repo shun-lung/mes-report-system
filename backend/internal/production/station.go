@@ -315,6 +315,8 @@ type stationLineOption struct {
 	Name        string    `json:"name"`
 	StationName string    `json:"stationName"`
 	Authorized  bool      `json:"authorized"`
+	StationID   uuid.UUID `json:"stationId"`
+	StdHead     int       `json:"stdHeadcount"`
 }
 
 // stationLines 掃描畫面可選的線別：有授權線別的人只列授權的；沒有任何授權（或總部管理員）列出全部。
@@ -322,7 +324,8 @@ func (h *Handler) stationLines(c *gin.Context) {
 	userID, superAdmin := auth.UserID(c), auth.IsSuperAdmin(c)
 	rows, err := h.svc.pool.Query(c, `
 		SELECT l.id, l.code, l.name, s.name,
-		       $3 OR EXISTS (SELECT 1 FROM user_line_assignments a WHERE a.user_id = $2 AND a.line_id = l.id)
+		       $3 OR EXISTS (SELECT 1 FROM user_line_assignments a WHERE a.user_id = $2 AND a.line_id = l.id),
+		       s.id, l.std_headcount
 		FROM production_lines l JOIN work_stations s ON s.id = l.station_id
 		WHERE l.factory_id = $1 AND l.is_active AND s.is_active
 		ORDER BY s.sort_order, l.code`, auth.FactoryID(c), userID, superAdmin)
@@ -346,4 +349,43 @@ func (h *Handler) stationLines(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"lines": mine, "restricted": true})
+}
+
+type stationCard struct {
+	WorkOrderID uuid.UUID `json:"workOrderId"`
+	CardNo      string    `json:"cardNo"`
+	Qty         float64   `json:"qty"`
+	Remaining   float64   `json:"remaining"`
+}
+
+// stationCards 現場報數：多張製令在指定站點仍有可報數量的流程卡（?stationId=&wo=id,id）。
+func (h *Handler) stationCards(c *gin.Context) {
+	stationID, err := uuid.Parse(c.Query("stationId"))
+	if err != nil {
+		httpx.Fail(c, httpx.Biz("請指定站點"))
+		return
+	}
+	var woIDs []uuid.UUID
+	for _, v := range strings.Split(c.Query("wo"), ",") {
+		if id, err := uuid.Parse(strings.TrimSpace(v)); err == nil {
+			woIDs = append(woIDs, id)
+		}
+	}
+	rows, err := h.svc.pool.Query(c, `
+		SELECT fc.work_order_id, fc.card_no, fc.qty, fp.remaining_qty
+		FROM flow_cards fc
+		JOIN flow_card_progress fp ON fp.card_id = fc.id AND fp.station_id = $3
+		WHERE fc.factory_id = $1 AND fc.work_order_id = ANY ($2)
+		  AND fc.status IN ('OPEN','IN_PROGRESS') AND fp.remaining_qty > 0
+		ORDER BY fc.card_no`, auth.FactoryID(c), woIDs, stationID)
+	if err != nil {
+		httpx.DBError(c, err)
+		return
+	}
+	list, err := pgx.CollectRows(rows, pgx.RowToStructByPos[stationCard])
+	if err != nil {
+		httpx.DBError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, list)
 }

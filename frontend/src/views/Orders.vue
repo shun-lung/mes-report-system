@@ -63,17 +63,13 @@
               </el-select>
             </div>
             <div class="tools">
-              <template v-if="canLabor">
-                <el-button :disabled="!selectedWO.length" type="success" @click="openBatchLabor">① 整批上工（{{ selectedWO.length }}）</el-button>
-              </template>
-              <el-button v-if="canScan" type="primary" plain @click="openScan">
-                {{ selectedWO.length ? `② 現場報數（${selectedWO.length}）` : '現場掃描' }}
+              <el-button v-if="canLabor || canScan" type="success" :disabled="!selectedWO.length" @click="fieldDlg = true">
+                現場報數（{{ selectedWO.length }}）
               </el-button>
-              <el-button v-if="canLabor" :disabled="!selectedRunning.length" @click="batchEnd">③ 整批下工（{{ selectedRunning.length }}）</el-button>
               <el-button v-if="canEdit" type="primary" @click="openWO(null)">新增製令</el-button>
             </div>
           </div>
-          <el-table ref="woTable" :data="shownWOs" size="small" empty-text="沒有符合的製令" row-key="id"
+          <el-table :data="shownWOs" size="small" empty-text="沒有符合的製令" row-key="id"
             @selection-change="(rows: WorkOrder[]) => (selectedWO = rows)">
             <el-table-column v-if="canLabor || canScan" type="selection" width="36" reserve-selection :selectable="laborable" />
             <el-table-column label="製令" min-width="180">
@@ -157,40 +153,7 @@
       </el-tabs>
     </div>
 
-    <ScanDialog v-model="scanDlg.open" :preset="scanDlg.preset" @closed="load" />
-    <el-dialog v-model="laborDlg.open" title="整批上工" width="min(760px, 96vw)">
-      <el-form inline @submit.prevent>
-        <el-form-item label="上工站點">
-          <el-select v-model="laborDlg.stationId" style="width: 160px" @change="autoAssign">
-            <el-option v-for="st in laborStations" :key="st.id" :label="st.name" :value="st.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="每線人數">
-          <el-input-number v-model="laborDlg.headcount" :min="1" :max="200" @change="(v: any) => laborDlg.rows.forEach((r) => (r.headcount = v))" />
-        </el-form-item>
-      </el-form>
-      <p class="muted small">同一條線同時只能上工一張製令；系統先把空閒的線依序分配，可自行調整。若線上已有其他製令，會先下工再換上。</p>
-      <el-table :data="laborDlg.rows" size="small">
-        <el-table-column label="製令" min-width="170">
-          <template #default="{ row }"><b>{{ row.woNo }}</b><div class="muted small">{{ row.itemNo }} {{ row.itemName }}</div></template>
-        </el-table-column>
-        <el-table-column label="線別" min-width="220">
-          <template #default="{ row }">
-            <el-select v-model="row.lineId" placeholder="選擇線別" style="width: 100%">
-              <el-option v-for="l in dlgLines" :key="l.id" :value="l.id"
-                :label="l.code + (busyLabel(l.id, row.woId) ? `（${busyLabel(l.id, row.woId)}）` : '')" />
-            </el-select>
-          </template>
-        </el-table-column>
-        <el-table-column label="人數" width="140">
-          <template #default="{ row }"><el-input-number v-model="row.headcount" :min="1" :max="200" size="small" /></template>
-        </el-table-column>
-      </el-table>
-      <template #footer>
-        <el-button @click="laborDlg.open = false">取消</el-button>
-        <el-button type="success" :loading="laborDlg.saving" @click="confirmBatchLabor">確認上工</el-button>
-      </template>
-    </el-dialog>
+    <FieldReportDialog v-model="fieldDlg" :work-orders="selectedWO" :station="woStation" @closed="load" />
     <el-dialog v-model="convertDlg.open" title="轉製令" width="min(520px, 94vw)">
       <p>將 <b>{{ selectedSO.length }}</b> 張訂單中尚未轉製令的明細，各建立一張製令：</p>
       <ul class="so-list">
@@ -265,8 +228,7 @@ import { useSession } from '../stores/session'
 import { statusText, type WorkOrder } from '../components/dashboard/types'
 import SalesOrderDialog from '../components/orders/SalesOrderDialog.vue'
 import CardsDialog from '../components/orders/CardsDialog.vue'
-import ScanDialog from '../components/station/ScanDialog.vue'
-import type { PresetWO } from '../components/station/types'
+import FieldReportDialog from '../components/orders/FieldReportDialog.vue'
 import type { Customer, ProductLite, SalesOrder } from '../components/orders/types'
 
 const session = useSession()
@@ -315,107 +277,15 @@ async function load() {
   ])
 }
 
-// ── 整批上工／下工 ──
-interface OpenLabor { lineId: string; lineCode: string; stationName: string; workOrderId: string; headcount: number }
-interface LaborStation { id: string; name: string; lines: { id: string; code: string; isActive: boolean; stdHeadcount: number }[] }
+// ── 現場報數（上工、報數量、下工同一畫面）──
+interface OpenLabor { lineId: string; lineCode: string; workOrderId: string; headcount: number }
 const canLabor = computed(() => session.can('labor:report'))
 const canScan = computed(() => session.can('scan:report'))
-// 現場報數：帶入勾選的製令與其上工中的線別，在掃描對話框直接點卡報數量
-const scanDlg = reactive({ open: false, preset: [] as PresetWO[] })
-function openScan() {
-  scanDlg.preset = selectedWO.value.map((w) => ({
-    woNo: w.woNo,
-    lines: laborOf(w.id).map((l) => ({ id: l.lineId, code: l.lineCode })),
-  }))
-  scanDlg.open = true
-}
+const fieldDlg = ref(false)
 const openLabor = ref<OpenLabor[]>([])
 const selectedWO = ref<WorkOrder[]>([])
-const woTable = ref()
 const laborable = (w: WorkOrder) => ['RELEASED', 'IN_PROGRESS'].includes(w.status)
 const laborOf = (woId: string) => openLabor.value.filter((l) => l.workOrderId === woId)
-const selectedRunning = computed(() => selectedWO.value.filter((w) => laborOf(w.id).length))
-const laborStations = ref<LaborStation[]>([])
-const laborDlg = reactive({
-  open: false, saving: false, stationId: '', headcount: 10,
-  rows: [] as { woId: string; woNo: string; itemNo: string; itemName: string; lineId: string; headcount: number }[],
-})
-const dlgLines = computed(() => laborStations.value.find((s) => s.id === laborDlg.stationId)?.lines ?? [])
-function busyLabel(lineId: string, woId: string) {
-  const l = openLabor.value.find((x) => x.lineId === lineId)
-  if (!l) return ''
-  if (l.workOrderId === woId) return '已在上工'
-  return '目前 ' + (workOrders.value.find((w) => w.id === l.workOrderId)?.woNo ?? '其他製令')
-}
-// 依序把空閒的線分配給各製令；已在此站上工的製令維持原線
-function autoAssign() {
-  const lines = dlgLines.value
-  const used = new Set<string>()
-  for (const r of laborDlg.rows) {
-    const here = openLabor.value.find((l) => l.workOrderId === r.woId && lines.some((x) => x.id === l.lineId))
-    r.lineId = here?.lineId ?? ''
-    if (here) used.add(here.lineId)
-  }
-  const free = lines.filter((l) => !used.has(l.id) && !openLabor.value.some((o) => o.lineId === l.id))
-  for (const r of laborDlg.rows) {
-    if (r.lineId) continue
-    const l = free.shift()
-    if (l) { r.lineId = l.id; used.add(l.id) }
-  }
-  const std = lines.find((l) => l.stdHeadcount)?.stdHeadcount
-  if (std) {
-    laborDlg.headcount = std
-    laborDlg.rows.forEach((r) => (r.headcount = std))
-  }
-}
-async function openBatchLabor() {
-  try {
-    if (!laborStations.value.length) {
-      laborStations.value = (await api<LaborStation[]>('/stations'))
-        .map((s) => ({ ...s, lines: s.lines.filter((l) => l.isActive) })).filter((s) => s.lines.length)
-    }
-  } catch (e) {
-    return fail(e)
-  }
-  // 預設站點：篩選中的製程站，否則選取製令共同的第一站
-  const pick = woStation.value || selectedWO.value[0]?.steps.find((s) => selectedWO.value.every((w) => w.steps.some((x) => x.station === s.station)))?.station
-  laborDlg.stationId = laborStations.value.find((s) => s.name === pick)?.id ?? laborStations.value[0]?.id ?? ''
-  laborDlg.rows = selectedWO.value.map((w) => ({ woId: w.id, woNo: w.woNo, itemNo: w.itemNo, itemName: w.itemName, lineId: '', headcount: laborDlg.headcount }))
-  autoAssign()
-  laborDlg.open = true
-}
-async function confirmBatchLabor() {
-  if (laborDlg.rows.some((r) => !r.lineId)) return ElMessage.warning('每張製令都要選線別（線別不夠時請減少勾選）')
-  const lineIds = laborDlg.rows.map((r) => r.lineId)
-  if (new Set(lineIds).size !== lineIds.length) return ElMessage.warning('同一條線只能上工一張製令，請調整線別')
-  laborDlg.saving = true
-  try {
-    await api('/labor/batch-start', {
-      method: 'POST',
-      body: { items: laborDlg.rows.map((r) => ({ lineId: r.lineId, workOrderId: r.woId, headcount: r.headcount })) },
-    })
-    ElMessage.success(`已上工 ${laborDlg.rows.length} 條線`)
-    laborDlg.open = false
-    woTable.value?.clearSelection()
-    await load()
-  } catch (e) {
-    fail(e)
-  } finally {
-    laborDlg.saving = false
-  }
-}
-async function batchEnd() {
-  const list = selectedRunning.value.flatMap((w) => laborOf(w.id).map((l) => `${l.lineCode}（${w.woNo}）`))
-  try {
-    await ElMessageBox.confirm(`下工以下線別：${list.join('、')}？`, '整批下工', { confirmButtonText: '確認下工', cancelButtonText: '返回', type: 'warning' })
-    const r = await api<{ ended: number }>('/labor/batch-end', { method: 'POST', body: { workOrderIds: selectedRunning.value.map((w) => w.id) } })
-    ElMessage.success(`已下工 ${r.ended} 條線`)
-    woTable.value?.clearSelection()
-    await load()
-  } catch (e) {
-    fail(e)
-  }
-}
 function fail(e: unknown) {
   if (e !== 'cancel' && e !== 'close') ElMessage.error((e as Error).message)
 }

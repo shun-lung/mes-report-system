@@ -9,7 +9,6 @@
       </el-select>
       <span v-else-if="session.factory" class="factory-name">{{ session.factory.code }} {{ session.factory.name }}</span>
       <div class="spacer" />
-      <button v-if="session.can('scan:report')" type="button" class="scan-link" @click="scanOpen = true">現場掃描</button>
       <el-badge :value="pending.length" :hidden="!pending.length" class="bell">
         <el-button size="small" text @click="alertOpen = true">缺料預警</el-button>
       </el-badge>
@@ -30,7 +29,6 @@
       </main>
     </div>
 
-    <ScanDialog v-model="scanOpen" />
 
     <el-dialog v-model="alertOpen" title="缺料預警 — 請選擇「通知建單」或「Pass」" width="min(920px, 96vw)">
       <AlertList :alerts="pending" @decided="loadAlerts" />
@@ -44,7 +42,6 @@ import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api'
 import { useSession } from '../stores/session'
 import AlertList, { type Alert } from './AlertList.vue'
-import ScanDialog from './station/ScanDialog.vue'
 
 const session = useSession()
 const route = useRoute()
@@ -52,7 +49,6 @@ const router = useRouter()
 const navOpen = ref(false)
 const alertOpen = ref(false)
 const pending = ref<Alert[]>([])
-const scanOpen = ref(false)
 
 const menu = computed(() =>
   router.options.routes
@@ -102,7 +98,6 @@ watch(() => session.factoryId, checkOnEnter)
 .factory-name { color: var(--text-secondary); }
 .spacer { flex: 1; }
 .user { color: var(--text-secondary); }
-.scan-link { padding: 5px 12px; border-radius: 6px; background: var(--series-1); color: #fff; text-decoration: none; font-size: 13px; border: 0; cursor: pointer; font: inherit; }
 .menu-btn { display: none; background: none; border: 0; font-size: 18px; color: var(--text-primary); cursor: pointer; }
 .body { flex: 1; display: flex; min-height: 0; }
 nav {

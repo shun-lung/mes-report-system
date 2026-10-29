@@ -42,6 +42,7 @@ type ScanResult struct {
 	Remaining   float64   `json:"remaining"` // 本卡本站剩餘可報
 	FinalStep   bool      `json:"finalStep"` // 末站：良品已入庫
 	WOCompleted bool      `json:"woCompleted"`
+	LaborEnded  bool      `json:"laborEnded"` // 本製令在本站已全數報完，本線自動下工
 }
 
 // Scan 現場掃描回報。單一交易內完成：
@@ -216,9 +217,27 @@ func (s *Service) Scan(ctx context.Context, in ScanInput) (ScanResult, error) {
 		}
 
 		res.WOCompleted, err = updateStatuses(ctx, tx, cardID, woID, in.At)
+		if err != nil {
+			return err
+		}
+		res.LaborEnded, err = endLaborIfStationDone(ctx, tx, in, woID, res.StepSeq)
 		return err
 	})
 	return res, err
+}
+
+// endLaborIfStationDone 本製令在本站（含所有上游站）已無剩餘可報量，代表本站數量已等於總數量：
+// 自動結束本線對此製令的上工，工時算到這次回報為止。
+func endLaborIfStationDone(ctx context.Context, tx pgx.Tx, in ScanInput, woID uuid.UUID, stepSeq int) (bool, error) {
+	tag, err := tx.Exec(ctx, `
+		UPDATE line_labor_sessions SET ended_at = $4, ended_by = $5
+		WHERE factory_id = $1 AND line_id = $2 AND work_order_id = $3 AND ended_at IS NULL AND started_at < $4
+		  AND NOT EXISTS (
+			SELECT 1 FROM flow_card_progress fp JOIN flow_cards c ON c.id = fp.card_id
+			WHERE c.work_order_id = $3 AND c.status NOT IN ('VOID','SPLIT')
+			  AND fp.step_seq <= $6 AND fp.remaining_qty > 0)`,
+		in.FactoryID, in.LineID, woID, in.At, in.UserID, stepSeq)
+	return tag.RowsAffected() > 0, err
 }
 
 // checkControl 生管管制：人員授權（使用者須被授權此線別）、強制上工（此線須已上工本製令）。

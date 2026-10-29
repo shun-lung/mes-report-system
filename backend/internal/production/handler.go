@@ -43,7 +43,8 @@ func (h *Handler) Register(scoped *gin.RouterGroup) {
 	scoped.POST("/work-orders/:id/cards/printed", auth.Require("wo:release"), h.markPrinted)
 
 	scoped.GET("/station/state", auth.Require("scan:report"), h.stationState)
-	scoped.GET("/station/lines", auth.Require("scan:report"), h.stationLines)
+	scoped.GET("/station/lines", auth.RequireAny("scan:report", "labor:report"), h.stationLines)
+	scoped.GET("/station/cards", auth.RequireAny("scan:report", "labor:report"), h.stationCards)
 	scoped.GET("/cards/:cardNo", auth.Require("scan:report"), h.cardInfo)
 	scoped.POST("/cards/:cardNo/split", auth.RequireAny("scan:report", "wo:edit"), h.splitCard)
 	scoped.POST("/cards/:cardNo/merge", auth.RequireAny("scan:report", "wo:edit"), h.mergeCard)
@@ -198,8 +199,9 @@ func (h *Handler) endLabor(c *gin.Context) {
 // openLabor 目前各線別進行中的上工（製令列表顯示「上工中」與整批下工用）。
 func (h *Handler) openLabor(c *gin.Context) {
 	rows, err := h.svc.pool.Query(c, `
-		SELECT s.line_id, l.code, st.name, s.work_order_id, s.headcount, s.started_at
+		SELECT s.line_id, l.code, st.name, s.work_order_id, w.wo_no, s.headcount, s.started_at
 		FROM line_labor_sessions s
+		JOIN work_orders w ON w.id = s.work_order_id
 		JOIN production_lines l ON l.id = s.line_id
 		JOIN work_stations st ON st.id = l.station_id
 		WHERE s.factory_id = $1 AND s.ended_at IS NULL
@@ -213,6 +215,7 @@ func (h *Handler) openLabor(c *gin.Context) {
 		LineCode    string    `json:"lineCode"`
 		StationName string    `json:"stationName"`
 		WorkOrderID uuid.UUID `json:"workOrderId"`
+		WONo        string    `json:"woNo"`
 		Headcount   int       `json:"headcount"`
 		StartedAt   time.Time `json:"startedAt"`
 	}

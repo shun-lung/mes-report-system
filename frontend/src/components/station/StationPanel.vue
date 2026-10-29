@@ -1,8 +1,8 @@
 <template>
   <div class="station">
     <header class="top">
-      <router-link v-if="!embedded" to="/" class="back" title="回系統">←</router-link>
-      <div v-if="!embedded" class="title">現場掃描</div>
+      <router-link to="/" class="back" title="回系統">←</router-link>
+      <div class="title">現場掃描</div>
       <el-select v-model="lineId" placeholder="選擇本機線別" size="large" class="line-select" @change="onLineChange">
         <el-option-group v-for="g in lineGroups" :key="g.station" :label="g.station">
           <el-option v-for="l in g.lines" :key="l.id" :label="`${l.code}　${l.name}`" :value="l.id" />
@@ -60,23 +60,6 @@
 
       <!-- 右：掃描與回報 -->
       <main class="main">
-        <section v-if="preset?.length" class="preset">
-          <div class="preset-title">勾選的製令 — 點流程卡直接報數量，不用再掃描</div>
-          <div v-for="r in presetRows" :key="r.woNo + r.lineId" class="preset-row">
-            <div class="preset-wo">
-              <b class="num">{{ r.woNo }}</b>
-              <span v-if="r.lineCode" class="line-tag" :class="{ on: r.lineId === lineId }">{{ r.lineCode }}</span>
-            </div>
-            <div class="preset-cards">
-              <el-button v-for="p in r.cards" :key="p.cardNo" :type="card?.cardNo === p.cardNo ? 'primary' : 'default'"
-                @click="pickPreset(r.lineId, p.cardNo)">
-                <span class="num">{{ shortCard(p.cardNo) }}</span><small>&nbsp;可報 {{ fmt.int(p.remaining) }}</small>
-              </el-button>
-              <span v-if="r.note" class="muted small">{{ r.note }}</span>
-            </div>
-          </div>
-        </section>
-
         <div class="scan-box" :class="{ ready: !card }">
           <input ref="scanInput" v-model="scanText" class="scan-input" placeholder="請掃描流程卡條碼（也可輸入製令號）"
             autocomplete="off" autocapitalize="off" spellcheck="false" @keydown.enter.prevent="onEnter" />
@@ -121,43 +104,9 @@
             </span>
           </div>
 
-          <template v-if="card.onRoute && card.remaining > 0">
-            <div class="qty-row">
-              <span class="label">良品</span>
-              <el-button size="large" class="qbtn" @click="goodQty = Math.max(0, goodQty - 5)">−5</el-button>
-              <el-button size="large" class="qbtn" @click="goodQty = Math.max(0, goodQty - 1)">−1</el-button>
-              <el-input-number v-model="goodQty" :min="0" :max="card.remaining" :controls="false" size="large" class="qty" />
-              <el-button size="large" class="qbtn" @click="goodQty = Math.min(maxGood, goodQty + 1)">＋1</el-button>
-              <el-button size="large" class="qbtn" @click="goodQty = maxGood">全部</el-button>
-            </div>
-
-            <div class="defects">
-              <span class="label">不良</span>
-              <div class="d-list">
-                <div v-for="d in defectCodes" :key="d.id" class="d-item" :class="{ active: defects[d.id]?.qty }">
-                  <button type="button" class="d-btn" @click="addDefect(d.id)">
-                    {{ d.code }} {{ d.name }}
-                    <b v-if="defects[d.id]?.qty" class="num">×{{ defects[d.id].qty }}</b>
-                  </button>
-                  <template v-if="defects[d.id]?.qty">
-                    <el-radio-group v-model="defects[d.id].disposition" size="small">
-                      <el-radio-button value="REWORK">重工</el-radio-button>
-                      <el-radio-button value="SCRAP">報廢</el-radio-button>
-                    </el-radio-group>
-                    <button type="button" class="d-minus" aria-label="減少" @click="removeDefect(d.id)">−</button>
-                  </template>
-                </div>
-                <span v-if="!defectCodes.length" class="muted">本站尚未設定不良代碼</span>
-              </div>
-            </div>
-
-            <div class="confirm-row">
-              <span class="sum">合計 <b class="num">{{ fmt.int(total) }}</b> ／ 可報 {{ fmt.int(card.remaining) }}</span>
-              <el-button size="large" @click="clearCard">取消</el-button>
-              <el-button size="large" type="primary" class="confirm" :loading="busy" :disabled="total <= 0 || total > card.remaining"
-                @click="confirm">確認回報（Enter）</el-button>
-            </div>
-          </template>
+          <CardReport v-if="card.onRoute && card.remaining > 0" ref="report" :card-no="card.cardNo" :remaining="card.remaining"
+            :line-id="lineId" :defect-codes="defectCodes" :device-id="`STATION-${state.line.code}`"
+            @done="onReported" @error="(m) => show('err', m)" @cancel="clearCard" />
         </section>
       </main>
     </div>
@@ -185,7 +134,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
-import type { PresetWO } from './types'
+import CardReport, { type DefectCode, type ScanResult } from './CardReport.vue'
 import { ElMessageBox } from 'element-plus'
 import { api, fmt } from '../../api'
 import { useSession } from '../../stores/session'
@@ -204,14 +153,11 @@ interface Card {
   requireAuth: boolean; requireLabor: boolean
   steps: { seq: number; station: string; input: number; good: number; defect: number; remaining: number; here: boolean }[]
 }
-interface DefectCode { id: string; stationId: string | null; code: string; name: string; isActive: boolean }
 
 const session = useSession()
 const canScan = computed(() => session.can('scan:report'))
 const storeKey = computed(() => `mes.station.line.${session.factoryId}`)
 interface StationLine { id: string; code: string; name: string; stationName: string; authorized: boolean }
-// embedded：嵌在系統對話框中（不顯示返回鍵與標題）
-const props = defineProps<{ embedded?: boolean; preset?: PresetWO[] }>()
 const lines = ref<StationLine[]>([])
 const restricted = ref(false)
 const allDefects = ref<DefectCode[]>([])
@@ -220,42 +166,8 @@ const state = ref<State | null>(null)
 const scanText = ref('')
 const scanInput = ref<HTMLInputElement>()
 const card = ref<Card | null>(null)
-const goodQty = ref(0)
-const defects = reactive<Record<string, { qty: number; disposition: 'REWORK' | 'SCRAP' }>>({})
+const report = ref<InstanceType<typeof CardReport>>()
 const banner = ref<{ type: 'ok' | 'err' | 'warn'; text: string } | null>(null)
-// 製令單勾選後帶入：依各製令上工中的線別列出可報的流程卡
-type PresetRow = { woNo: string; lineId: string; lineCode: string; cards: { cardNo: string; remaining: number }[]; note: string }
-const presetRows = ref<PresetRow[]>([])
-async function loadPreset() {
-  if (!props.preset?.length) return
-  const rows: PresetRow[] = []
-  for (const w of props.preset) {
-    if (!w.lines.length) {
-      rows.push({ woNo: w.woNo, lineId: '', lineCode: '', cards: [], note: '尚未上工：請先在製令單「整批上工」，或在下方選線別後掃描' })
-      continue
-    }
-    for (const l of w.lines) {
-      const row: PresetRow = { woNo: w.woNo, lineId: l.id, lineCode: l.code, cards: [], note: '' }
-      try {
-        const r = await api<any>(`/cards/${encodeURIComponent(w.woNo)}?lineId=${l.id}`)
-        row.cards = 'pick' in r ? r.pick : [{ cardNo: r.cardNo, remaining: r.remaining }]
-        if (!row.cards.length) row.note = '本站沒有可報的卡'
-      } catch (e) {
-        row.note = (e as Error).message
-      }
-      rows.push(row)
-    }
-  }
-  presetRows.value = rows
-}
-async function pickPreset(id: string, cardNo: string) {
-  if (lineId.value !== id) {
-    lineId.value = id
-    saveLine(id)
-    await loadState()
-  }
-  await lookup(cardNo)
-}
 // 掃到製令號且本站有多張卡可報時，列出讓現場挑選
 const picks = ref<{ woNo: string; pick: { cardNo: string; qty: number; remaining: number }[] } | null>(null)
 const busy = ref(false)
@@ -274,9 +186,6 @@ const lineGroups = computed(() => {
 const defectCodes = computed(() =>
   allDefects.value.filter((d) => d.isActive && (!d.stationId || d.stationId === state.value?.line.stationId)),
 )
-const defectTotal = computed(() => Object.values(defects).reduce((a, d) => a + d.qty, 0))
-const total = computed(() => goodQty.value + defectTotal.value)
-const maxGood = computed(() => Math.max(0, (card.value?.remaining ?? 0) - defectTotal.value))
 
 const time = (v: string) => fmt.time(v, session.factory?.timezone ?? 'Asia/Taipei')
 const shortCard = (no: string) => no.split('-').slice(-2).join('-')
@@ -342,7 +251,7 @@ async function onEnter() {
   const text = scanText.value.trim()
   if (text) return lookup(text)
   // 空白 Enter：已帶出流程卡時視為確認回報
-  if (card.value && total.value > 0 && total.value <= card.value.remaining) confirm()
+  if (report.value?.canSubmit) report.value.submit()
 }
 
 async function lookup(raw: string) {
@@ -371,7 +280,6 @@ async function lookup(raw: string) {
       return focusScan()
     }
     card.value = c
-    goodQty.value = c.remaining
     if (c.remaining <= 0) {
       show('warn', '本站沒有可報數量：上站尚未完成，或本站已報完')
       return focusScan()
@@ -390,58 +298,23 @@ async function lookup(raw: string) {
   }
 }
 
-// 點不良代碼：從良品移一雙到不良（良品已為 0 時，只在未超過可報量時增加）
-function addDefect(id: string) {
-  if (!card.value) return
-  if (goodQty.value > 0) goodQty.value--
-  else if (total.value >= card.value.remaining) return
-  defects[id] = { qty: (defects[id]?.qty ?? 0) + 1, disposition: defects[id]?.disposition ?? 'REWORK' }
-}
-// 減少不良：移回良品
-function removeDefect(id: string) {
-  const d = defects[id]
-  if (!d) return
-  d.qty--
-  goodQty.value++
-  if (d.qty <= 0) delete defects[id]
-}
 function clearCard() {
   picks.value = null
   card.value = null
-  goodQty.value = 0
-  for (const k of Object.keys(defects)) delete defects[k]
 }
 
-async function confirm() {
-  if (!card.value || busy.value) return
-  busy.value = true
-  try {
-    const res = await api<{ goodQty: number; defectQty: number; remaining: number; finalStep: boolean; woCompleted: boolean }>('/scans', {
-      method: 'POST',
-      body: {
-        cardNo: card.value.cardNo,
-        lineId: lineId.value,
-        goodQty: goodQty.value,
-        defects: Object.entries(defects).map(([defectCodeId, d]) => ({ defectCodeId, qty: d.qty, disposition: d.disposition })),
-        deviceId: `STATION-${state.value?.line.code}`,
-      },
-    })
-    const rework = Object.values(defects).filter((d) => d.disposition === 'REWORK').reduce((a, d) => a + d.qty, 0)
-    let text = `✓ ${shortCard(card.value.cardNo)} 已回報：良品 ${fmt.int(res.goodQty)}`
-    if (res.defectQty) text += `、不良 ${fmt.int(res.defectQty)}`
-    if (rework) text += `（重工 ${fmt.int(rework)} 雙回到本站待重報）`
-    text += res.remaining > 0 ? ` · 本站還可報 ${fmt.int(res.remaining)}` : ' · 本站已報完'
-    if (res.finalStep) text += ' · 已完工入庫'
-    if (res.woCompleted) text += ` · 製令 ${card.value.woNo} 完工！`
-    show('ok', text)
-    clearCard()
-    await Promise.all([loadState(), loadPreset()])
-  } catch (e) {
-    show('err', (e as Error).message)
-  } finally {
-    busy.value = false
-    focusScan()
-  }
+async function onReported(res: ScanResult) {
+  let text = `✓ ${shortCard(card.value!.cardNo)} 已回報：良品 ${fmt.int(res.goodQty)}`
+  if (res.defectQty) text += `、不良 ${fmt.int(res.defectQty)}`
+  if (res.rework) text += `（重工 ${fmt.int(res.rework)} 雙回到本站待重報）`
+  text += res.remaining > 0 ? ` · 本站還可報 ${fmt.int(res.remaining)}` : ' · 本站已報完'
+  if (res.finalStep) text += ' · 已完工入庫'
+  if (res.woCompleted) text += ` · 製令 ${card.value!.woNo} 完工！`
+  if (res.laborEnded) text += ` · 本站數量已達總數，${state.value?.line.code} 已自動下工`
+  show('ok', text)
+  clearCard()
+  await loadState()
+  focusScan()
 }
 
 async function undo(r: State['recent'][number]) {
@@ -546,13 +419,7 @@ onMounted(async () => {
     lineId.value = lines.value[0].id
     saveLine(lineId.value)
   }
-  // 有帶入製令時，預設切到第一張製令上工中的線
-  const first = props.preset?.find((w) => w.lines.length)?.lines[0]
-  if (first) {
-    lineId.value = first.id
-    saveLine(first.id)
-  }
-  await Promise.all([loadState(), loadPreset()])
+  await loadState()
   focusScan()
   refreshTimer = window.setInterval(() => !busy.value && loadState(), 30_000)
   document.addEventListener('click', refocus)
@@ -601,15 +468,6 @@ onUnmounted(() => {
   flex: 1; min-width: 0; font-size: 24px; padding: 14px 18px; border-radius: 12px; border: 2px solid var(--border);
   background: var(--surface-1); color: var(--text-primary); font-variant-numeric: tabular-nums;
 }
-.preset { margin-bottom: 12px; padding: 12px 14px; border: 1px solid var(--series-1); border-radius: 10px; background: var(--series-1-soft); }
-.preset-title { font-weight: 600; margin-bottom: 8px; }
-.preset-row { display: flex; gap: 12px; align-items: center; padding: 6px 0; border-top: 1px solid var(--grid); flex-wrap: wrap; }
-.preset-row:first-of-type { border-top: 0; }
-.preset-wo { min-width: 230px; display: flex; gap: 8px; align-items: center; }
-.preset-cards { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; flex: 1; }
-.preset-cards .el-button { margin-left: 0; }
-.line-tag { font-size: 12px; padding: 1px 8px; border-radius: 4px; background: var(--surface-2); border: 1px solid var(--border); }
-.line-tag.on { background: var(--series-1); color: #fff; border-color: var(--series-1); }
 .picks { margin-top: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); }
 .picks-title { font-weight: 600; margin-bottom: 10px; }
 .picks-list { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -634,24 +492,8 @@ onUnmounted(() => {
 .step { padding: 6px 12px; border-radius: 8px; background: var(--surface-2); color: var(--text-secondary); font-size: 14px; display: flex; flex-direction: column; line-height: 1.3; }
 .step.here { background: var(--series-1); color: #fff; font-weight: 600; }
 .step small { font-size: 12px; opacity: 0.85; }
-.qty-row, .defects, .confirm-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.label { width: 48px; font-weight: 600; }
-.qty { width: 140px; }
 .ctl { display: flex; align-items: center; gap: 8px; margin: 2px 0; flex-wrap: wrap; }
 .ctl .small { font-size: 13px; color: var(--text-secondary); }
-.qty :deep(input) { font-size: 26px; font-weight: 700; text-align: center; color: var(--text-primary); }
-.qbtn { min-width: 64px; }
-.defects { align-items: flex-start; }
-.d-list { flex: 1; display: flex; flex-wrap: wrap; gap: 8px; }
-.d-item { display: flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 10px; padding: 4px; }
-.d-item.active { border-color: var(--status-critical); }
-.d-btn, .d-minus { border: 0; background: transparent; color: var(--text-primary); font: inherit; padding: 8px 10px; cursor: pointer; border-radius: 8px; }
-.d-btn:hover, .d-minus:hover { background: var(--surface-2); }
-.d-minus { font-size: 20px; line-height: 1; padding: 6px 12px; }
-.confirm-row { justify-content: flex-end; border-top: 1px solid var(--grid); padding-top: 14px; }
-.sum { margin-right: auto; color: var(--text-secondary); }
-.sum b { font-size: 22px; color: var(--text-primary); }
-.confirm { min-width: 200px; height: 52px; font-size: 18px; }
 .reason { margin: 0 0 12px; font-size: 16px; }
 .opt-r { float: right; color: var(--text-muted); font-size: 12px; margin-left: 12px; }
 @media (max-width: 900px) {
