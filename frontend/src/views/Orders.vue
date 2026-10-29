@@ -114,7 +114,8 @@
             <el-table-column label="發料" width="120">
               <template #default="{ row }">
                 <template v-for="st in [issueState(row)]" :key="st.text">
-                  <el-tag size="small" :type="st.type" :effect="st.type === 'danger' ? 'dark' : 'light'">{{ st.text }}</el-tag>
+                  <el-tag size="small" :type="st.type" :effect="st.type === 'danger' ? 'dark' : 'light'" class="link" title="點開看用料"
+                    @click="openIssue(row)">{{ st.text }}</el-tag>
                   <div v-if="st.note" class="muted small">{{ st.note }}</div>
                 </template>
               </template>
@@ -128,7 +129,7 @@
                   <el-button v-if="row.status === 'DRAFT' && session.can('wo:release')" size="small" type="primary" @click="release([row])">開立</el-button>
                   <el-button v-if="row.status === 'DRAFT' && canEdit" size="small" @click="openWO(row)">修改</el-button>
                   <el-button v-if="['RELEASED', 'IN_PROGRESS'].includes(row.status) && session.can('inventory:edit') && row.issue.done < row.issue.items"
-                    size="small" type="warning" @click="issue(row.id)">發料</el-button>
+                    size="small" type="warning" @click="openIssue(row)">發料</el-button>
                   <el-button v-if="row.cards && row.status !== 'CANCELLED'" size="small" @click="openCards(row)">流程卡</el-button>
                   <el-button v-if="['DRAFT', 'RELEASED'].includes(row.status) && canEdit" size="small" text type="danger" @click="cancelWO(row)">取消</el-button>
                 </div>
@@ -177,6 +178,7 @@
       </template>
     </el-dialog>
 
+    <IssueDialog v-model="issueDlg.open" :wo="issueDlg.wo" @issued="load" />
     <CardsDialog v-model="cardsDlg.open" :wo-id="cardsDlg.id" :wo-no="cardsDlg.woNo" @changed="load" />
     <SalesOrderDialog v-model="soDlg.open" :order="soDlg.order" :customers="customers" :products="products" @saved="load" />
 
@@ -228,6 +230,7 @@ import { useSession } from '../stores/session'
 import { statusText, type WorkOrder } from '../components/dashboard/types'
 import SalesOrderDialog from '../components/orders/SalesOrderDialog.vue'
 import CardsDialog from '../components/orders/CardsDialog.vue'
+import IssueDialog from '../components/orders/IssueDialog.vue'
 import FieldReportDialog from '../components/orders/FieldReportDialog.vue'
 import type { Customer, ProductLite, SalesOrder } from '../components/orders/types'
 
@@ -429,20 +432,10 @@ function issueState(w: WorkOrder): { text: string; type: 'info' | 'danger' | 'wa
   if (!done) return { text: `待發料 0/${items}`, type: 'danger', note }
   return { text: `部分發料 ${done}/${items}`, type: 'warning', note }
 }
-async function issue(id: string) {
-  try {
-    type Line = { itemNo: string; unit: string; qty: number; stock?: number }
-    const r = await api<{ issued: Line[]; short: Line[]; onArrival: string[] }>(`/work-orders/${id}/issue`, { method: 'POST' })
-    const parts: string[] = []
-    if (r.issued.length) parts.push(`已發料：${r.issued.map((l) => `${l.itemNo} ${fmt.dec(l.qty, l.qty % 1 ? 2 : 0)}`).join('、')}`)
-    if (r.short.length) parts.push(`庫存不足已依現有量調整，仍缺：${r.short.map((l) => `${l.itemNo} ${fmt.dec(l.qty, l.qty % 1 ? 2 : 0)} ${l.unit}`).join('、')}（可到「缺料預警」產生採購單）`)
-    if (!r.issued.length && !r.short.length) parts.push('出庫扣帳料件都已發完')
-    if (r.onArrival.length) parts.push(`${r.onArrival.join('、')} 為到站扣帳，現場掃描時自動扣，不需發料`)
-    ElMessage({ type: r.short.length ? 'warning' : 'success', duration: 7000, message: parts.join('。') })
-    await load()
-  } catch (e) {
-    fail(e)
-  }
+// 發料：先看用料清單再確認各項發料量
+const issueDlg = reactive({ open: false, wo: null as WorkOrder | null })
+function openIssue(w: WorkOrder) {
+  Object.assign(issueDlg, { open: true, wo: w })
 }
 const cardsDlg = reactive({ open: false, id: '', woNo: '' })
 function openCards(w: WorkOrder) {
@@ -497,5 +490,6 @@ onMounted(load)
 .search { width: 220px; }
 .station-filter { width: 150px; }
 .running { color: var(--status-good); margin-top: 2px; }
+.link { cursor: pointer; }
 .opt-r { float: right; color: var(--text-muted); font-size: 12px; margin-left: 12px; }
 </style>

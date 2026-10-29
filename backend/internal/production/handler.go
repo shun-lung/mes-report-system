@@ -39,6 +39,7 @@ func (h *Handler) Register(scoped *gin.RouterGroup) {
 	scoped.POST("/work-orders/:id/cancel", auth.Require("wo:edit"), h.cancelWorkOrder)
 	scoped.POST("/work-orders/:id/release", auth.Require("wo:release"), h.release)
 	scoped.POST("/work-orders/:id/issue", auth.Require("inventory:edit"), h.issue)
+	scoped.GET("/work-orders/:id/materials", auth.RequireAny("wo:view", "inventory:view"), h.workOrderMaterials)
 	scoped.GET("/work-orders/:id/cards", auth.Require("wo:view"), h.cardsForPrint)
 	scoped.POST("/work-orders/:id/cards/printed", auth.Require("wo:release"), h.markPrinted)
 
@@ -132,7 +133,24 @@ func (h *Handler) issue(c *gin.Context) {
 	if !ok {
 		return
 	}
-	res, err := h.svc.IssueMaterials(c, auth.FactoryID(c), id, auth.UserID(c), time.Now())
+	// 未帶 lines 時發全部未發量（舊用法）；帶 lines 時依各料件指定數量發料
+	var req struct {
+		Lines []struct {
+			MaterialID uuid.UUID `json:"materialId" binding:"required"`
+			Qty        float64   `json:"qty" binding:"gte=0"`
+		} `json:"lines" binding:"dive"`
+	}
+	if c.Request.ContentLength > 0 && !httpx.Bind(c, &req) {
+		return
+	}
+	var qtys map[uuid.UUID]float64
+	if req.Lines != nil {
+		qtys = map[uuid.UUID]float64{}
+		for _, l := range req.Lines {
+			qtys[l.MaterialID] = l.Qty
+		}
+	}
+	res, err := h.svc.IssueMaterials(c, auth.FactoryID(c), id, auth.UserID(c), qtys, time.Now())
 	if err != nil {
 		httpx.Fail(c, err)
 		return

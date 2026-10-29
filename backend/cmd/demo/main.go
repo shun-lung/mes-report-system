@@ -419,7 +419,7 @@ func (d *demo) orderFlow() {
 
 	all := append([]uuid.UUID{wos[0].ID, wos[1].ID}, sfgWOs...)
 	for _, id := range all {
-		_, err := d.svc.IssueMaterials(d.ctx, d.factory, id, wh, d.at(-25))
+		_, err := d.svc.IssueMaterials(d.ctx, d.factory, id, wh, nil, d.at(-25))
 		d.must(err)
 	}
 	step("07:35 李倉管 發料（出庫扣帳）：布料、鞋盒、吊牌")

@@ -4,12 +4,16 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"net/http"
 	"time"
+
+	"github.com/gin-gonic/gin"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"mes/internal/auth"
 	"mes/internal/docno"
 	"mes/internal/httpx"
 	"mes/internal/inventory"
@@ -210,9 +214,10 @@ type IssueLine struct {
 	Stock  float64 `json:"stock,omitempty"` // Short：發料當下的庫存
 }
 
-// IssueMaterials 倉管發料：將製令「出庫扣帳」料件的未發數量自所屬倉扣帳。
-// 庫存不足時依現有庫存調整發料量（不發成負數），其餘列為不足；到站扣帳料件由現場掃描自動扣帳，不在此發料。
-func (s *Service) IssueMaterials(ctx context.Context, factoryID, woID, userID uuid.UUID, at time.Time) (IssueResult, error) {
+// IssueMaterials 倉管發料：將製令「出庫扣帳」料件自所屬倉扣帳；到站扣帳料件由現場掃描自動扣帳，不在此發料。
+// qtys 為各用料（work_order_materials.id）本次發料量：超過未發量或庫存即拒絕，不自動調整。
+// qtys 為 nil 時發全部未發量，庫存不足依現有庫存調整發料量（不發成負數），其餘列為不足。
+func (s *Service) IssueMaterials(ctx context.Context, factoryID, woID, userID uuid.UUID, qtys map[uuid.UUID]float64, at time.Time) (IssueResult, error) {
 	res := IssueResult{Issued: []IssueLine{}, Short: []IssueLine{}, OnArrival: []string{}}
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var status string
@@ -245,10 +250,28 @@ func (s *Service) IssueMaterials(ctx context.Context, factoryID, woID, userID uu
 		if err != nil {
 			return err
 		}
+		known := map[uuid.UUID]bool{}
+		for _, m := range list {
+			known[m.ID] = true
+		}
+		for id, q := range qtys {
+			if q > 0 && !known[id] {
+				return httpx.Biz("有料件已發完或不屬於此製令，請重新整理")
+			}
+		}
 		for _, m := range list {
 			if m.Timing != "ON_ISSUE" {
 				res.OnArrival = append(res.OnArrival, m.ItemNo)
 				continue
+			}
+			want := m.Qty
+			if qtys != nil {
+				if want = round4(qtys[m.ID]); want <= 0 {
+					continue
+				}
+				if want > m.Qty {
+					return httpx.Biz("%s 本次發料 %g 超過未發量 %g", m.ItemNo, want, m.Qty)
+				}
 			}
 			wh, err := inventory.Warehouse(ctx, tx, factoryID, inventory.WarehouseTypeFor(m.Category))
 			if err != nil {
@@ -260,7 +283,10 @@ func (s *Service) IssueMaterials(ctx context.Context, factoryID, woID, userID uu
 				wh, m.ProductID).Scan(&stock); err != nil {
 				return err
 			}
-			qty := round4(math.Min(m.Qty, math.Max(stock, 0)))
+			if qtys != nil && want > stock {
+				return httpx.Biz("%s 庫存只有 %g %s，不能發 %g", m.ItemNo, math.Max(stock, 0), m.Unit, want)
+			}
+			qty := round4(math.Min(want, math.Max(stock, 0)))
 			if qty < m.Qty {
 				res.Short = append(res.Short, IssueLine{ItemNo: m.ItemNo, Unit: m.Unit, Qty: round4(m.Qty - qty), Stock: stock})
 			}
@@ -286,4 +312,54 @@ func (s *Service) IssueMaterials(ctx context.Context, factoryID, woID, userID uu
 
 func round4(v float64) float64 {
 	return math.Round(v*10000) / 10000
+}
+
+// MaterialRow 製令用料（發料畫面）：應發、已發、未發與所屬倉庫存。
+type MaterialRow struct {
+	ID        uuid.UUID `json:"id"`
+	ItemNo    string    `json:"itemNo"`
+	ItemName  string    `json:"itemName"`
+	Unit      string    `json:"unit"`
+	Type      string    `json:"materialType"`
+	QtyPer    float64   `json:"qtyPer"`
+	Required  float64   `json:"required"`
+	Issued    float64   `json:"issued"`
+	Timing    string    `json:"deductTiming"`
+	Station   *string   `json:"station"`
+	Warehouse *string   `json:"warehouse"`
+	Stock     float64   `json:"stock"`
+	SubFrom   *string   `json:"substitutedFrom"`
+}
+
+func (h *Handler) workOrderMaterials(c *gin.Context) {
+	id, ok := httpx.ParamID(c)
+	if !ok {
+		return
+	}
+	rows, err := h.svc.pool.Query(c, `
+		SELECT m.id, p.item_no, p.name, p.unit, m.material_type, m.qty_per::float8, m.required_qty::float8, m.issued_qty::float8,
+		       m.deduct_timing, s.name, wh.name, COALESCE(b.qty, 0)::float8, sp.item_no
+		FROM work_order_materials m
+		JOIN work_orders w ON w.id = m.work_order_id
+		JOIN products p ON p.id = m.product_id
+		LEFT JOIN work_stations s ON s.id = m.consume_station_id
+		LEFT JOIN products sp ON sp.id = m.substituted_from_id
+		LEFT JOIN LATERAL (
+			SELECT id, name FROM warehouses
+			WHERE factory_id = w.factory_id AND is_active
+			  AND type = CASE p.category WHEN 'SFG' THEN 'WIP' WHEN 'FG' THEN 'FG' ELSE 'RAW' END
+			ORDER BY code LIMIT 1) wh ON true
+		LEFT JOIN inventory_balances b ON b.warehouse_id = wh.id AND b.product_id = m.product_id
+		WHERE m.work_order_id = $1 AND w.factory_id = $2
+		ORDER BY m.deduct_timing DESC, p.item_no`, id, auth.FactoryID(c))
+	if err != nil {
+		httpx.DBError(c, err)
+		return
+	}
+	list, err := pgx.CollectRows(rows, pgx.RowToStructByPos[MaterialRow])
+	if err != nil {
+		httpx.DBError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, list)
 }
