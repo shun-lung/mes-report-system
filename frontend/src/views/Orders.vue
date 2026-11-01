@@ -133,6 +133,7 @@
                     size="small" type="warning" @click="openIssue(row)">發料</el-button>
                   <el-button v-if="row.cards && row.status !== 'CANCELLED'" size="small" @click="openCards(row)">流程卡</el-button>
                   <el-button v-if="['DRAFT', 'RELEASED'].includes(row.status) && canEdit" size="small" text type="danger" @click="cancelWO(row)">取消</el-button>
+                  <el-button v-if="['IN_PROGRESS', 'COMPLETED'].includes(row.status) && canEdit" size="small" @click="closeWO(row)">結案</el-button>
                 </div>
               </template>
             </el-table-column>
@@ -249,7 +250,7 @@ const soFilter = ref<'open' | 'all'>('open')
 const woFilter = ref<'open' | 'all'>('open')
 const soStatus: Record<string, string> = { OPEN: '未生產', IN_PRODUCTION: '生產中', COMPLETED: '已完成', CLOSED: '結案', CANCELLED: '已取消' }
 const soTag: Record<string, string> = { OPEN: 'info', IN_PRODUCTION: 'primary', COMPLETED: 'success', CANCELLED: 'info' }
-const woTag: Record<string, string> = { DRAFT: 'info', RELEASED: 'warning', IN_PROGRESS: 'primary', COMPLETED: 'success', CANCELLED: 'info' }
+const woTag: Record<string, string> = { DRAFT: 'info', RELEASED: 'warning', IN_PROGRESS: 'primary', COMPLETED: 'success', CLOSED: 'success', CANCELLED: 'info' }
 
 const shownOrders = computed(() => orders.value.filter((o) => soFilter.value === 'all' || !['COMPLETED', 'CLOSED', 'CANCELLED'].includes(o.status)))
 const woSearch = ref('')
@@ -402,6 +403,23 @@ async function cancelWO(w: WorkOrder) {
     )
     await api(`/work-orders/${w.id}/cancel`, { method: 'POST', body: { reason: value ?? '' } })
     ElMessage.success('製令已取消')
+    alertsChanged()
+    await load()
+  } catch (e) {
+    fail(e)
+  }
+}
+// 結案：數量不再補足（例如報廢短少）時由生管結案，所有線別同步下工
+async function closeWO(w: WorkOrder) {
+  const running = laborOf(w.id).map((l) => l.lineName)
+  try {
+    const { value } = await ElMessageBox.prompt(
+      `結案製令 ${w.woNo}？完工 ${fmt.int(w.finishedQty)}／計畫 ${fmt.int(w.plannedQty)}。` +
+        (running.length ? `上工中的 ${running.join('、')} 會同步下工。` : '') + '結案後不可再回報。',
+      '製令結案', { confirmButtonText: '結案', cancelButtonText: '返回', inputPlaceholder: '結案原因（選填，例如：報廢短少 1 雙不補）', type: 'warning' },
+    )
+    const r = await api<{ endedLines: string[] }>(`/work-orders/${w.id}/close`, { method: 'POST', body: { reason: value ?? '' } })
+    ElMessage.success(`製令 ${w.woNo} 已結案` + (r.endedLines.length ? `，${r.endedLines.join('、')} 已下工` : ''))
     alertsChanged()
     await load()
   } catch (e) {

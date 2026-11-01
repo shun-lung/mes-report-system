@@ -59,6 +59,63 @@ func (s *Service) UpdateDraft(ctx context.Context, factoryID, woID uuid.UUID, qt
 	})
 }
 
+// endWorkOrderLabor 結束此製令在所有線別進行中的上工，回傳下工的線別名稱。
+func endWorkOrderLabor(ctx context.Context, tx pgx.Tx, woID, userID uuid.UUID, at time.Time) ([]string, error) {
+	rows, err := tx.Query(ctx, `
+		UPDATE line_labor_sessions s SET ended_at = $3, ended_by = $2
+		FROM production_lines l
+		WHERE l.id = s.line_id AND s.work_order_id = $1 AND s.ended_at IS NULL AND s.started_at < $3
+		RETURNING l.name`, woID, userID, at)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
+}
+
+// CloseWorkOrder 製令結案：已開始生產但不再補足數量（例如報廢短少）時，由生管結案。
+// 所有線別同步下工、待處理的缺料預警結案、所屬訂單狀態重算；結案後不可再回報。回傳下工的線別。
+func (s *Service) CloseWorkOrder(ctx context.Context, factoryID, woID, userID uuid.UUID, reason string, at time.Time) ([]string, error) {
+	var ended []string
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var status, woNo string
+		if err := tx.QueryRow(ctx, `SELECT status, wo_no FROM work_orders WHERE id = $1 AND factory_id = $2 FOR UPDATE`,
+			woID, factoryID).Scan(&status, &woNo); err != nil {
+			return err
+		}
+		switch status {
+		case "RELEASED", "IN_PROGRESS", "COMPLETED":
+		default:
+			return httpx.Biz("製令 %s 狀態為 %s，不可結案", woNo, status)
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE work_orders SET status = 'CLOSED', completed_at = COALESCE(completed_at, $2), updated_at = $2 WHERE id = $1`,
+			woID, at); err != nil {
+			return err
+		}
+		var err error
+		if ended, err = endWorkOrderLabor(ctx, tx, woID, userID, at); err != nil {
+			return err
+		}
+		note := "製令結案"
+		if reason != "" {
+			note += "：" + reason
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE material_alerts SET status = 'PASSED', decided_by = $2, decided_at = $3, note = $4
+			WHERE work_order_id = $1 AND status = 'PENDING'`, woID, userID, at, note); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE notifications SET read_at = $2
+			WHERE ref_type = 'material_alert' AND read_at IS NULL
+			  AND ref_id IN (SELECT id FROM material_alerts WHERE work_order_id = $1)`, woID, at); err != nil {
+			return err
+		}
+		return refreshSalesOrder(ctx, tx, woID, at)
+	})
+	return ended, err
+}
+
 // CancelWorkOrder 取消尚未開始生產的製令：沒有掃描、上工、發料或扣帳紀錄。
 // 流程卡作廢、待處理的缺料預警結案，所屬訂單狀態重算。
 func (s *Service) CancelWorkOrder(ctx context.Context, factoryID, woID, userID uuid.UUID, reason string, at time.Time) error {

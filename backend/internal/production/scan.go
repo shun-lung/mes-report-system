@@ -226,6 +226,12 @@ func (s *Service) Scan(ctx context.Context, in ScanInput) (ScanResult, error) {
 			return err
 		}
 		res.LaborEnded, err = endLaborIfStationDone(ctx, tx, in, woID, res.StepSeq)
+		if err != nil || !res.WOCompleted {
+			return err
+		}
+		// 製令完工：其他線別也同步下工
+		ended, err := endWorkOrderLabor(ctx, tx, woID, in.UserID, in.At)
+		res.LaborEnded = res.LaborEnded || len(ended) > 0
 		return err
 	})
 	return res, err

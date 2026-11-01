@@ -37,6 +37,7 @@ func (h *Handler) Register(scoped *gin.RouterGroup) {
 	scoped.POST("/work-orders", auth.Require("wo:edit"), h.createWorkOrder)
 	scoped.PUT("/work-orders/:id", auth.Require("wo:edit"), h.updateWorkOrder)
 	scoped.POST("/work-orders/:id/cancel", auth.Require("wo:edit"), h.cancelWorkOrder)
+	scoped.POST("/work-orders/:id/close", auth.Require("wo:edit"), h.closeWorkOrder)
 	scoped.POST("/work-orders/:id/release", auth.Require("wo:release"), h.release)
 	scoped.POST("/work-orders/:id/issue", auth.Require("inventory:edit"), h.issue)
 	scoped.GET("/work-orders/:id/materials", auth.RequireAny("wo:view", "inventory:view"), h.workOrderMaterials)
@@ -447,4 +448,21 @@ func (h *Handler) cancelWorkOrder(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+func (h *Handler) closeWorkOrder(c *gin.Context) {
+	id, ok := httpx.ParamID(c)
+	if !ok {
+		return
+	}
+	var req cancelRequest
+	if !httpx.Bind(c, &req) {
+		return
+	}
+	ended, err := h.svc.CloseWorkOrder(c, auth.FactoryID(c), id, auth.UserID(c), req.Reason, time.Now())
+	if err != nil {
+		httpx.Fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"endedLines": ended})
 }
