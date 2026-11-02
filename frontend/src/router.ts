@@ -5,6 +5,7 @@ export const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/login', component: () => import('./views/Login.vue'), meta: { public: true } },
+    { path: '/view', component: () => import('./views/PublicBoard.vue'), meta: { public: true, title: '生產 8HR 看板' } },
     { path: '/station', component: () => import('./views/Station.vue') },
     { path: '/print/cards/:id', component: () => import('./views/PrintCards.vue') },
     {

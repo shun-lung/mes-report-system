@@ -16,6 +16,7 @@ type Config struct {
 	AdminPassword string
 	DemoPassword  string // cmd/demo 建立生管、倉管、組長帳號用
 	StaticDir     string // 前端建置目錄；設定後由 API 一併提供網頁
+	PublicBoard   string // 公開唯讀看板的工廠代碼（如 TW1）；空白＝不開放
 }
 
 // Load 讀取設定；ENV_FILE 可指定設定檔（預設 .env），例如 ENV_FILE=.env.supabase 改連雲端資料庫。
@@ -34,6 +35,7 @@ func Load() Config {
 		AdminPassword: getenv("ADMIN_PASSWORD", "admin1234"),
 		DemoPassword:  getenv("DEMO_PASSWORD", "Demo1234!"),
 		StaticDir:     getenv("STATIC_DIR", ""),
+		PublicBoard:   getenv("PUBLIC_DASHBOARD", ""),
 	}
 }
 

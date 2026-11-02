@@ -55,7 +55,11 @@ func main() {
 	purchasing.NewHandler(purchasing.NewService(pool)).Register(scoped)
 	production.NewHandler(production.NewService(pool)).Register(scoped)
 	inventory.NewHandler(pool).Register(scoped)
-	dashboard.NewHandler(pool).Register(scoped)
+	dash := dashboard.NewHandler(pool)
+	dash.Register(scoped)
+	if cfg.PublicBoard != "" {
+		dash.RegisterPublic(api, cfg.PublicBoard)
+	}
 
 	if cfg.StaticDir != "" {
 		r.NoRoute(httpx.SPA(cfg.StaticDir))

@@ -29,6 +29,11 @@ func (h *Handler) Register(scoped *gin.RouterGroup) {
 	scoped.GET("/dashboard/shift", auth.Require("report:view"), h.shift)
 }
 
+// RegisterPublic 公開唯讀看板（給沒有帳號的人看，例如履歷連結）：只有看板查詢，沒有任何操作。
+func (h *Handler) RegisterPublic(public *gin.RouterGroup, factoryCode string) {
+	public.GET("/public/dashboard/shift", auth.PublicFactory(h.pool, factoryCode), h.shift)
+}
+
 type Cell struct {
 	Good   float64 `json:"good"`
 	Defect float64 `json:"defect"`

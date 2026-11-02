@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"mes/internal/httpx"
 )
@@ -114,6 +115,19 @@ func UserID(c *gin.Context) uuid.UUID {
 
 func IsSuperAdmin(c *gin.Context) bool {
 	return c.GetBool(ctxSuperAdmin)
+}
+
+// PublicFactory 不需登入的唯讀頁面：固定使用指定代碼的工廠，查無此廠回 404。
+func PublicFactory(pool *pgxpool.Pool, code string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var id uuid.UUID
+		if err := pool.QueryRow(c, `SELECT id FROM factories WHERE code = $1`, code).Scan(&id); err != nil {
+			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "未開放公開看板"})
+			return
+		}
+		c.Set(ctxFactoryID, id)
+		c.Next()
+	}
 }
 
 func FactoryID(c *gin.Context) uuid.UUID {

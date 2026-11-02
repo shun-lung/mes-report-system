@@ -2,6 +2,7 @@
   <div class="page">
     <div class="page-title">
       <h2>生產 8HR 看板</h2>
+      <el-tag v-if="publicView" size="small" type="info">唯讀展示</el-tag>
       <span v-if="d" class="secondary">
         {{ d.factory.code }} {{ d.factory.name }} · {{ d.shift.name }}
         {{ fmt.time(d.shift.start, tz) }}–{{ fmt.time(d.shift.end, tz) }} · 生產日 {{ d.shift.workDate }}
@@ -79,11 +80,11 @@
             <span v-if="!idleLines && !offLines">全部運轉</span>
           </div>
         </div>
-        <router-link to="/alerts" class="kpi link">
+        <component :is="publicView ? 'div' : 'router-link'" to="/alerts" class="kpi" :class="{ link: !publicView }">
           <div class="k-label">待處理缺料預警</div>
           <div class="k-value num">{{ k.pendingAlerts }}<small> 筆</small></div>
-          <div class="k-sub">{{ k.pendingAlerts ? '⚠ 前往處理 →' : '無' }}</div>
-        </router-link>
+          <div class="k-sub">{{ k.pendingAlerts ? (publicView ? '⚠ 待生管處理' : '⚠ 前往處理 →') : '無' }}</div>
+        </component>
       </div>
 
       <div class="row-main">
@@ -207,11 +208,14 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { api, fmt } from '../api'
+import { api, ApiError, fmt } from '../api'
 import BarList from '../components/dashboard/BarList.vue'
 import CumulativeChart from '../components/dashboard/CumulativeChart.vue'
 import HourlyGrid from '../components/dashboard/HourlyGrid.vue'
 import { attainmentClass, attainmentGlyph, statusText, type Line, type ShiftDashboard } from '../components/dashboard/types'
+
+// publicView：給沒有帳號的人看（/view），只能切換班別日期，沒有任何操作連結
+const props = defineProps<{ publicView?: boolean }>()
 
 const d = ref<ShiftDashboard | null>(null)
 const date = ref('')
@@ -295,7 +299,7 @@ async function load() {
     const q = new URLSearchParams()
     if (date.value) q.set('date', date.value)
     if (shiftId.value) q.set('shiftId', shiftId.value)
-    d.value = await api<ShiftDashboard>('/dashboard/shift?' + q)
+    d.value = props.publicView ? await publicShift(q) : await api<ShiftDashboard>('/dashboard/shift?' + q)
     date.value = d.value.shift.workDate
     shiftId.value = d.value.shift.id
     updated.value = fmt.time(d.value.now, tz.value)
@@ -303,6 +307,12 @@ async function load() {
   } catch (e) {
     error.value = (e as Error).message
   }
+}
+// 公開唯讀看板：不帶登入資訊，查詢 /public/dashboard/shift
+async function publicShift(q: URLSearchParams) {
+  const res = await fetch('/api/public/dashboard/shift?' + q)
+  if (!res.ok) throw new ApiError((await res.json().catch(() => ({}))).error ?? res.statusText, res.status)
+  return (await res.json()) as ShiftDashboard
 }
 function go(ref: { shiftId: string; date: string }) {
   date.value = ref.date

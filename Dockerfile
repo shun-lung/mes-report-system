@@ -19,7 +19,7 @@ RUN apk add --no-cache ca-certificates && adduser -D -H mes
 WORKDIR /app
 COPY --from=go /out/ /app/bin/
 COPY --from=web /src/dist /app/dist
-ENV STATIC_DIR=/app/dist GIN_MODE=release
+ENV STATIC_DIR=/app/dist GIN_MODE=release PUBLIC_DASHBOARD=TW1
 USER mes
 # 雲端主機以 PORT 指定埠號；本機執行可用 -e PORT=8080
 CMD ["/app/bin/api"]
