@@ -174,6 +174,12 @@ func (s *Service) Scan(ctx context.Context, in ScanInput) (ScanResult, error) {
 			if in.GoodQty > 0 {
 				whType := inventory.WarehouseTypeFor(category)
 				wh, err := inventory.Warehouse(ctx, tx, in.FactoryID, whType)
+				if whType == "FG" {
+					// 成品先進完工暫存倉，倉管勾選製令入庫後才轉成品倉；未設暫存倉則直接入成品倉
+					if st, err2 := inventory.Warehouse(ctx, tx, in.FactoryID, "STAGE"); err2 == nil {
+						wh, err = st, nil
+					}
+				}
 				if err != nil {
 					return err
 				}

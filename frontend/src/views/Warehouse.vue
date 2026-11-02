@@ -5,6 +5,10 @@
     <el-empty v-if="!canEdit && !canAdjust" description="此帳號沒有入出庫權限" />
     <div v-else class="card">
       <el-tabs v-model="tab">
+        <el-tab-pane v-if="canEdit" label="完工入庫" name="putaway" lazy>
+          <PutawayTab @done="loadBase" />
+        </el-tab-pane>
+
         <el-tab-pane v-if="canEdit" label="收料入庫" name="receipt">
           <el-form label-width="80px" @submit.prevent>
             <el-form-item label="入庫倉"><WarehouseSelect v-model="receipt.warehouseId" :warehouses="warehouses" /></el-form-item>
@@ -107,7 +111,7 @@
             </el-table-column>
             <el-table-column width="70"><template #default="{ row }"><el-button size="small" text @click="editWh(row)">編輯</el-button></template></el-table-column>
           </el-table>
-          <p class="muted small">系統自動扣帳與入庫時，材料用「原物料」、半成品用「暫存」、成品用「成品」類型中代碼排序最前、使用中的倉庫。</p>
+          <p class="muted small">系統自動扣帳與入庫時，材料用「原物料」、半成品用「暫存」、成品末站良品先進「完工暫存」（完工入庫後轉「成品」）類型中代碼排序最前、使用中的倉庫。</p>
         </el-tab-pane>
       </el-tabs>
     </div>
@@ -144,6 +148,7 @@ import { timingName } from '../labels'
 import { useSession } from '../stores/session'
 import LineEditor, { type ProductOpt, type Row } from '../components/warehouse/LineEditor.vue'
 import WarehouseSelect, { type WH } from '../components/warehouse/WarehouseSelect.vue'
+import PutawayTab from '../components/warehouse/PutawayTab.vue'
 
 interface Balance { warehouseCode: string; productId: string; qty: number }
 interface Material { id: string; productId: string; itemNo: string; itemName: string; unit: string; deductTiming: string; consumeStationName: string | null; requiredQty: number; issuedQty: number }
@@ -160,7 +165,7 @@ const balances = ref<Balance[]>([])
 const stations = ref<{ id: string; name: string }[]>([])
 const openWOs = ref<WO[]>([])
 const materials = ref<Material[]>([])
-const whTypeName: Record<string, string> = { RAW: '原物料', WIP: '暫存（半成品）', FG: '成品' }
+const whTypeName: Record<string, string> = { RAW: '原物料', WIP: '暫存（半成品）', STAGE: '完工暫存', FG: '成品' }
 
 const firstOf = (type: string) => warehouses.value.find((w) => w.type === type && w.isActive)?.id ?? ''
 const receipt = reactive({ warehouseId: '', note: '', rows: [] as Row[] })

@@ -25,7 +25,7 @@ type warehouseRow struct {
 type warehouseInput struct {
 	Code      string     `json:"code" binding:"required,max=20"`
 	Name      string     `json:"name" binding:"required,max=100"`
-	Type      string     `json:"type" binding:"required,oneof=RAW WIP FG"`
+	Type      string     `json:"type" binding:"required,oneof=RAW WIP FG STAGE"`
 	StationID *uuid.UUID `json:"stationId"`
 	IsActive  *bool      `json:"isActive"`
 }

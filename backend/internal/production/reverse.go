@@ -157,6 +157,22 @@ func (s *Service) ReverseScan(ctx context.Context, factoryID, scanID, userID uui
 			return err
 		}
 		for _, t := range txns {
+			if t.Type == "FG_IN" && t.Qty > 0 {
+				// 完工暫存倉的數量已被倉管入成品倉時，不能直接撤銷
+				var whType string
+				if err := tx.QueryRow(ctx, `SELECT type FROM warehouses WHERE id = $1`, t.WarehouseID).Scan(&whType); err != nil {
+					return err
+				}
+				if whType == "STAGE" {
+					left, err := stagedQty(ctx, tx, sc.woID, t.WarehouseID)
+					if err != nil {
+						return err
+					}
+					if left < t.Qty {
+						return httpx.Biz("此回報的良品已入成品倉（暫存倉剩 %g），請倉管先沖銷該製令的完工入庫再撤銷", left)
+					}
+				}
+			}
 			if _, err := inventory.Post(ctx, tx, inventory.Txn{
 				FactoryID: factoryID, Type: "REVERSAL", WarehouseID: t.WarehouseID, ProductID: t.ProductID, Qty: -t.Qty,
 				WorkOrderID: &sc.woID, RefType: "scan", RefID: &res.ReversalID, ReversalOf: &t.ID,

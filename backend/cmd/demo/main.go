@@ -321,9 +321,10 @@ func (d *demo) setupMasterData() {
 	d.must(d.exec(`INSERT INTO warehouses (id, factory_id, code, name, type, station_id) VALUES
 		($1, $2, 'W01', '原物料倉', 'RAW', NULL),
 		($3, $2, 'W02', '成型暫存倉', 'WIP', $4),
-		($5, $2, 'W03', '成品倉', 'FG', NULL)`,
-		httpx.NewID(), d.factory, d.whWIP, d.station["FORM"], httpx.NewID()))
-	step("不良代碼 7 筆；倉庫：原物料倉、成型暫存倉、成品倉")
+		($5, $2, 'W03', '成品倉', 'FG', NULL),
+		($6, $2, 'W04', '完工暫存倉', 'STAGE', NULL)`,
+		httpx.NewID(), d.factory, d.whWIP, d.station["FORM"], httpx.NewID(), httpx.NewID()))
+	step("不良代碼 7 筆；倉庫：原物料倉、成型暫存倉、成品倉、完工暫存倉")
 }
 
 // ───────────────────────── 訂單 → 製令 → 預警 → 發料 ─────────────────────────

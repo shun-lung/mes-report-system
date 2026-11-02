@@ -41,6 +41,8 @@ func (h *Handler) Register(scoped *gin.RouterGroup) {
 	scoped.POST("/work-orders/:id/release", auth.Require("wo:release"), h.release)
 	scoped.POST("/work-orders/:id/issue", auth.Require("inventory:edit"), h.issue)
 	scoped.GET("/work-orders/:id/materials", auth.RequireAny("wo:view", "inventory:view"), h.workOrderMaterials)
+	scoped.GET("/putaway", auth.RequireAny("inventory:view", "wo:view"), h.listPutaway)
+	scoped.POST("/putaway", auth.Require("inventory:edit"), h.putaway)
 	scoped.GET("/work-orders/:id/cards", auth.Require("wo:view"), h.cardsForPrint)
 	scoped.POST("/work-orders/:id/cards/printed", auth.Require("wo:release"), h.markPrinted)
 

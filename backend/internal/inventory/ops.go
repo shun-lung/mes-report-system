@@ -322,10 +322,11 @@ func (h *Handler) reverse(c *gin.Context) {
 		}
 
 		legs := []uuid.UUID{id}
-		if typ == "TRANSFER" && refID != nil {
+		if typ == "TRANSFER" && refID != nil && refType != nil {
+			// 倉庫移轉與完工入庫（putaway）都是出入兩筆共用 ref_id
 			rows, err := tx.Query(ctx, `
-				SELECT id FROM inventory_transactions WHERE ref_type = 'transfer' AND ref_id = $1 AND txn_type = 'TRANSFER'
-				ORDER BY qty`, *refID) // 先處理出庫（負數）那筆
+				SELECT id FROM inventory_transactions WHERE ref_type = $2 AND ref_id = $1 AND txn_type = 'TRANSFER'
+				ORDER BY qty`, *refID, *refType) // 先處理出庫（負數）那筆
 			if err != nil {
 				return err
 			}
