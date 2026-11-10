@@ -1,0 +1,24 @@
+# 防休眠：每 10 分鐘讀一次公開看板。Render 免費版閒置 15 分鐘會休眠；
+# 看板會查資料庫，也讓 Supabase 保持有使用（免費版 7 天沒使用會暫停）。Mac 關機也照常執行。
+# 要停用：GitHub 專案 → Actions → 防休眠 → 右上「…」→ Disable workflow
+name: 防休眠
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: 讀取公開看板
+        run: |
+          for i in 1 2 3; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" -m 90 https://mes-report-system.onrender.com/api/public/dashboard/shift)
+            echo "第 $i 次：HTTP $code"
+            [ "$code" = 200 ] && exit 0
+            sleep 20
+          done
+          exit 1
